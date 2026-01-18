@@ -44,7 +44,9 @@ private struct PipelineContentView: View {
     @State private var isDropTargeted = false
     @State private var isRecordButtonHovered = false
     @State private var isRecordingWindowPickerPresented = false
-    @AppStorage(AppDefaultsKey.screenContextEnabled) private var screenContextEnabled: Bool = false
+    @State private var screenPickerPurpose: ScreenPickerPurpose?
+    @State private var screenTogglePending = false
+    @State private var screenPickerHandled = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -83,6 +85,7 @@ private struct PipelineContentView: View {
     private var pipelineBody: some View {
         VStack(spacing: 24) {
             recordControl
+            captureToggles
             statusArea
 
             Spacer(minLength: 0)
@@ -102,8 +105,10 @@ private struct PipelineContentView: View {
         }
         .sheet(isPresented: $isRecordingWindowPickerPresented) {
             ScreenContextRecordingPickerView { selection in
-                model.send(.startRecordingWithWindow(selection))
+                screenPickerHandled = true
+                handleScreenSelection(selection)
             }
+            .onDisappear(perform: handleScreenPickerDismiss)
         }
     }
 
@@ -240,6 +245,23 @@ private struct PipelineContentView: View {
                 }
             }
 
+            if case .recording = model.state {
+                RollingTickerText(text: model.liveTranscriptionLine.isEmpty ? "Listening..." : model.liveTranscriptionLine)
+            }
+
+            if case .recording = model.state, let image = model.latestScreenCaptureImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 320, maxHeight: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .accessibilityLabel(Text("Latest screen capture"))
+            }
+
             if shouldShowScreenInferenceStatus, let status = model.screenInferenceStatus {
                 HStack(spacing: 12) {
                     Text("Screen inference")
@@ -257,6 +279,53 @@ private struct PipelineContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var captureToggles: some View {
+        HStack(spacing: 12) {
+            CaptureToggleButton(
+                label: "Microphone",
+                isOn: model.microphoneCaptureEnabled,
+                onSymbol: "mic.fill",
+                offSymbol: "mic.slash.fill"
+            ) {
+                model.setMicrophoneCaptureEnabled(!model.microphoneCaptureEnabled)
+            }
+
+            CaptureToggleButton(
+                label: "System audio",
+                isOn: model.systemAudioCaptureEnabled,
+                onSymbol: "speaker.wave.2.fill",
+                offSymbol: "speaker.slash.fill"
+            ) {
+                model.setSystemAudioCaptureEnabled(!model.systemAudioCaptureEnabled)
+            }
+
+            CaptureToggleButton(
+                label: "Screen",
+                isOn: isScreenToggleOn,
+                onSymbol: "display",
+                offSymbol: "rectangle.slash"
+            ) {
+                handleScreenToggleChange(!isScreenToggleOn)
+            }
+        }
+        .disabled(!captureTogglesEnabled)
+        .opacity(captureTogglesEnabled ? 1 : 0.6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var isScreenToggleOn: Bool {
+        model.screenCaptureEnabled || screenTogglePending
+    }
+
+    private var captureTogglesEnabled: Bool {
+        switch model.state {
+        case .idle, .recording, .recorded, .done, .failed:
+            return true
+        default:
+            return false
+        }
     }
 
     private var shouldShowScreenInferenceStatus: Bool {
@@ -367,11 +436,57 @@ private struct PipelineContentView: View {
     }
 
     private func requestStartRecording() {
-        if screenContextEnabled {
-            isRecordingWindowPickerPresented = true
+        if model.screenCaptureEnabled {
+            presentScreenPicker(for: .startRecording)
         } else {
             model.send(.startRecording)
         }
+    }
+
+    private func handleScreenToggleChange(_ enabled: Bool) {
+        if enabled {
+            if case .recording = model.state {
+                if model.hasScreenCaptureSelection {
+                    model.setScreenCaptureEnabled(true)
+                } else {
+                    screenTogglePending = true
+                    presentScreenPicker(for: .enableDuringRecording)
+                }
+            } else {
+                model.setScreenCaptureEnabled(true)
+            }
+        } else {
+            screenTogglePending = false
+            model.setScreenCaptureEnabled(false)
+        }
+    }
+
+    private func presentScreenPicker(for purpose: ScreenPickerPurpose) {
+        screenPickerPurpose = purpose
+        screenPickerHandled = false
+        isRecordingWindowPickerPresented = true
+    }
+
+    private func handleScreenSelection(_ selection: ScreenContextWindowSelection) {
+        guard let purpose = screenPickerPurpose else { return }
+        switch purpose {
+        case .startRecording:
+            model.send(.startRecordingWithWindow(selection))
+        case .enableDuringRecording:
+            model.setScreenCaptureSelection(selection)
+            model.setScreenCaptureEnabled(true)
+            screenTogglePending = false
+        }
+        screenPickerPurpose = nil
+    }
+
+    private func handleScreenPickerDismiss() {
+        guard let purpose = screenPickerPurpose else { return }
+        if purpose == .enableDuringRecording && !screenPickerHandled {
+            screenTogglePending = false
+        }
+        screenPickerPurpose = nil
+        screenPickerHandled = false
     }
 }
 
@@ -380,6 +495,50 @@ private enum RecordButtonState {
     case recording
     case recorded
     case processing
+}
+
+private enum ScreenPickerPurpose {
+    case startRecording
+    case enableDuringRecording
+}
+
+private struct RollingTickerText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(Text(text))
+    }
+}
+
+private struct CaptureToggleButton: View {
+    let label: String
+    let isOn: Bool
+    let onSymbol: String
+    let offSymbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isOn ? onSymbol : offSymbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle()
+                        .fill(isOn ? Color.accentColor : Color.gray.opacity(0.2))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
 }
 
 private struct AudioWaveformView: View {

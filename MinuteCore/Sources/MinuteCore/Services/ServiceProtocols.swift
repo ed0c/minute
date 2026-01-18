@@ -42,6 +42,15 @@ public protocol AudioLevelMetering: Sendable {
     func setLevelHandler(_ handler: (@Sendable (Float) -> Void)?) async
 }
 
+public protocol AudioCaptureControlling: Sendable {
+    func setMicrophoneEnabled(_ enabled: Bool) async
+    func setSystemAudioEnabled(_ enabled: Bool) async
+}
+
+public protocol LiveAudioSinkConfiguring: Sendable {
+    func setLiveAudioSink(_ sink: (any LiveAudioChunkSinking)?) async
+}
+
 public struct MediaImportResult: Sendable, Equatable {
     public var wavURL: URL
     public var duration: TimeInterval
