@@ -1,4 +1,5 @@
-import CoreMedia
+import CoreGraphics
+import CoreVideo
 import Foundation
 @preconcurrency import ScreenCaptureKit
 import os
@@ -27,6 +28,18 @@ public struct ScreenContextCaptureResult: Sendable, Equatable {
     }
 }
 
+public struct ScreenContextCapturedFrame: Sendable, Equatable {
+    public var imageData: Data
+    public var timestampSeconds: Double
+    public var windowTitle: String
+
+    public init(imageData: Data, timestampSeconds: Double, windowTitle: String) {
+        self.imageData = imageData
+        self.timestampSeconds = timestampSeconds
+        self.windowTitle = windowTitle
+    }
+}
+
 public actor ScreenContextCaptureService {
     private let logger = Logger(subsystem: "roblibob.Minute", category: "screen-context")
     private let inferencer: any ScreenContextInferencing
@@ -40,7 +53,8 @@ public actor ScreenContextCaptureService {
         selections: [ScreenContextWindowSelection],
         minimumFrameInterval: TimeInterval = 10.0,
         timestampOffsetSeconds: TimeInterval = 0,
-        statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)? = nil
+        statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)? = nil,
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)? = nil
     ) async throws {
         guard session == nil else { return }
         guard !selections.isEmpty else { return }
@@ -58,7 +72,8 @@ public actor ScreenContextCaptureService {
             minimumFrameInterval: minimumFrameInterval,
             timestampOffsetSeconds: timestampOffsetSeconds,
             logger: logger,
-            statusHandler: statusHandler
+            statusHandler: statusHandler,
+            frameHandler: frameHandler
         )
     }
 
@@ -99,7 +114,8 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
         minimumFrameInterval: TimeInterval,
         timestampOffsetSeconds: TimeInterval,
         logger: Logger,
-        statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)?
+        statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)?,
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?
     ) async throws -> ScreenContextCaptureSession {
         let collector = ScreenContextEventCollector(maxEvents: 120)
         let statusReporter = ScreenContextStatusReporter(statusHandler: statusHandler)
@@ -114,6 +130,7 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
                 statusReporter: statusReporter,
                 minimumFrameInterval: minimumFrameInterval,
                 timestampOffsetSeconds: timestampOffsetSeconds,
+                frameHandler: frameHandler,
                 logger: logger
             )
             try await capture.start()
@@ -222,6 +239,7 @@ private final class WindowCapture: NSObject, @unchecked Sendable {
         statusReporter: ScreenContextStatusReporter,
         minimumFrameInterval: TimeInterval,
         timestampOffsetSeconds: TimeInterval,
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?,
         logger: Logger
     ) throws {
         let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -239,6 +257,7 @@ private final class WindowCapture: NSObject, @unchecked Sendable {
             statusReporter: statusReporter,
             minimumFrameInterval: minimumFrameInterval,
             timestampOffsetSeconds: timestampOffsetSeconds,
+            frameHandler: frameHandler,
             logger: logger
         )
         self.stream = stream
@@ -283,6 +302,7 @@ private final class ScreenContextStreamOutput: NSObject, SCStreamOutput {
         statusReporter: ScreenContextStatusReporter,
         minimumFrameInterval: TimeInterval,
         timestampOffsetSeconds: TimeInterval,
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?,
         logger: Logger
     ) {
         self.processor = ScreenContextFrameProcessor(
@@ -292,6 +312,7 @@ private final class ScreenContextStreamOutput: NSObject, SCStreamOutput {
             statusReporter: statusReporter,
             minimumFrameInterval: minimumFrameInterval,
             timestampOffsetSeconds: timestampOffsetSeconds,
+            frameHandler: frameHandler,
             logger: logger
         )
         super.init()
@@ -311,6 +332,7 @@ private final class ScreenContextFrameProcessor {
     private let statusReporter: ScreenContextStatusReporter
     private let minimumFrameInterval: TimeInterval
     private let timestampOffsetSeconds: TimeInterval
+    private let frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?
     private let logger: Logger
 
     private var lastCaptureAt: CFAbsoluteTime = 0
@@ -323,6 +345,7 @@ private final class ScreenContextFrameProcessor {
         statusReporter: ScreenContextStatusReporter,
         minimumFrameInterval: TimeInterval,
         timestampOffsetSeconds: TimeInterval,
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?,
         logger: Logger
     ) {
         self.windowTitle = windowTitle
@@ -331,6 +354,7 @@ private final class ScreenContextFrameProcessor {
         self.statusReporter = statusReporter
         self.minimumFrameInterval = minimumFrameInterval
         self.timestampOffsetSeconds = timestampOffsetSeconds
+        self.frameHandler = frameHandler
         self.logger = logger
     }
 
@@ -355,6 +379,14 @@ private final class ScreenContextFrameProcessor {
             firstTimestampSeconds: firstTimestampSeconds,
             offsetSeconds: timestampOffsetSeconds
         )
+
+        if let frameHandler {
+            frameHandler(ScreenContextCapturedFrame(
+                imageData: imageData,
+                timestampSeconds: timestampSeconds,
+                windowTitle: windowTitle
+            ))
+        }
 
         lastCaptureAt = now
         statusReporter.markInferenceStarted()
