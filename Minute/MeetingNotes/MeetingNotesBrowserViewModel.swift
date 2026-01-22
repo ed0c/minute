@@ -1,14 +1,20 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import MinuteCore
 
 @MainActor
 final class MeetingNotesBrowserViewModel: ObservableObject {
+    struct NotePreview: Equatable {
+        var summaryLine: String
+        var durationSeconds: TimeInterval?
+    }
 
     @Published private(set) var notes: [MeetingNoteItem] = []
     @Published private(set) var isRefreshing: Bool = false
     @Published private(set) var sidebarErrorMessage: String?
+    @Published private(set) var notePreviews: [String: NotePreview] = [:]
 
     @Published private(set) var isLoadingContent: Bool = false
     @Published private(set) var noteContent: String?
@@ -21,6 +27,7 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
     private var listTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var deleteTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
     private var defaultsObserver: AnyCancellable?
 
     init(browserProvider: @escaping @Sendable () -> any MeetingNotesBrowsing = MeetingNotesBrowserViewModel.defaultBrowserProvider) {
@@ -37,6 +44,7 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         listTask?.cancel()
         loadTask?.cancel()
         deleteTask?.cancel()
+        previewTask?.cancel()
     }
 
     func refresh() {
@@ -51,17 +59,19 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
                 await MainActor.run {
                     self?.notes = notes
                     self?.isRefreshing = false
+                    self?.refreshPreviews(for: notes)
                 }
             } catch is CancellationError {
                 await MainActor.run {
                     self?.isRefreshing = false
                 }
             } catch {
-                let message = (error as? MinuteError)?.errorDescription ?? String(describing: error)
+                let message = ErrorHandler.userMessage(for: error, fallback: "Failed to load notes.")
                 await MainActor.run {
                     self?.notes = []
                     self?.sidebarErrorMessage = message
                     self?.isRefreshing = false
+                    self?.notePreviews = [:]
                 }
             }
         }
@@ -92,7 +102,7 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
                     self?.isLoadingContent = false
                 }
             } catch {
-                let message = (error as? MinuteError)?.errorDescription ?? "Failed to load note."
+                let message = ErrorHandler.userMessage(for: error, fallback: "Failed to load note.")
                 await MainActor.run {
                     self?.overlayErrorMessage = message
                     self?.isLoadingContent = false
@@ -116,6 +126,10 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         isLoadingContent = false
     }
 
+    func preview(for item: MeetingNoteItem) -> NotePreview? {
+        notePreviews[item.id]
+    }
+
     func delete(_ item: MeetingNoteItem) {
         deleteTask?.cancel()
         sidebarErrorMessage = nil
@@ -130,11 +144,12 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
                         self.dismissOverlay()
                     }
                     self.refresh()
+                    self.notePreviews[item.id] = nil
                 }
             } catch is CancellationError {
                 return
             } catch {
-                let message = (error as? MinuteError)?.errorDescription ?? "Failed to delete note."
+                let message = ErrorHandler.userMessage(for: error, fallback: "Failed to delete note.")
                 await MainActor.run { [weak self] in
                     self?.sidebarErrorMessage = message
                 }
@@ -156,20 +171,17 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
 
     nonisolated private static func defaultBrowserProvider() -> any MeetingNotesBrowsing {
         let defaults = UserDefaults.standard
-        let meetingsRelativePathKey = "meetingsRelativePath"
-        let audioRelativePathKey = "audioRelativePath"
-        let transcriptsRelativePathKey = "transcriptsRelativePath"
-        let vaultRootBookmarkKey = "vaultRootBookmark"
-        let meetingsRelativePath = defaults.string(forKey: meetingsRelativePathKey) ?? "Meetings"
-        let audioRelativePath = defaults.string(forKey: audioRelativePathKey) ?? "Meetings/_audio"
-        let transcriptsRelativePath = defaults.string(forKey: transcriptsRelativePathKey) ?? "Meetings/_transcripts"
-        let bookmarkStore = UserDefaultsVaultBookmarkStore(key: vaultRootBookmarkKey)
+        let configuration = AppConfiguration(defaults: defaults)
+        let bookmarkStore = UserDefaultsVaultBookmarkStore(
+            defaults: defaults,
+            key: AppConfiguration.Defaults.vaultRootBookmarkKey
+        )
         let access = VaultAccess(bookmarkStore: bookmarkStore)
         return VaultMeetingNotesBrowser(
             vaultAccess: access,
-            meetingsRelativePath: meetingsRelativePath,
-            audioRelativePath: audioRelativePath,
-            transcriptsRelativePath: transcriptsRelativePath
+            meetingsRelativePath: configuration.meetingsRelativePath,
+            audioRelativePath: configuration.audioRelativePath,
+            transcriptsRelativePath: configuration.transcriptsRelativePath
         )
     }
 
@@ -180,5 +192,117 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         } catch {
             return true
         }
+    }
+
+    private func refreshPreviews(for notes: [MeetingNoteItem]) {
+        previewTask?.cancel()
+
+        let configuration = AppConfiguration(defaults: UserDefaults.standard)
+        let provider = browserProvider
+        let vaultAccess = Self.makeVaultAccess()
+        previewTask = Task.detached { [notes, configuration, provider, vaultAccess] in
+            var previews: [String: NotePreview] = [:]
+            previews.reserveCapacity(notes.count)
+
+            let browser = provider()
+            for item in notes {
+                if Task.isCancelled { return }
+                let summaryLine = await Self.loadSummaryLine(for: item, browser: browser)
+                let durationSeconds = Self.loadDurationSeconds(
+                    for: item,
+                    configuration: configuration,
+                    vaultAccess: vaultAccess
+                )
+                previews[item.id] = NotePreview(summaryLine: summaryLine, durationSeconds: durationSeconds)
+            }
+
+            await MainActor.run { [weak self] in
+                self?.notePreviews = previews
+            }
+        }
+    }
+
+    nonisolated private static let summaryPreviewWordCount = 18
+
+    nonisolated private static func loadSummaryLine(
+        for item: MeetingNoteItem,
+        browser: any MeetingNotesBrowsing
+    ) async -> String {
+        guard let content = try? await browser.loadNoteContent(for: item) else {
+            return "No summary yet."
+        }
+        let summary = extractSummaryPreview(from: content)
+        return summary.isEmpty ? "No summary yet." : summary
+    }
+
+    nonisolated private static func extractSummaryPreview(from content: String) -> String {
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let summaryIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "## Summary" }) else {
+            return ""
+        }
+
+        var summaryLines: [String] = []
+        var index = summaryIndex + 1
+        while index < lines.count {
+            let line = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("## ") {
+                break
+            }
+            if !line.isEmpty {
+                summaryLines.append(line)
+            }
+            index += 1
+        }
+
+        guard !summaryLines.isEmpty else { return "" }
+        let summaryText = summaryLines.joined(separator: " ")
+        let words = summaryText.split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { return "" }
+
+        let previewCount = min(words.count, summaryPreviewWordCount)
+        let preview = words.prefix(previewCount).joined(separator: " ")
+        if words.count > previewCount {
+            return "\(preview)..."
+        }
+        return preview
+    }
+
+    nonisolated private static func loadDurationSeconds(
+        for item: MeetingNoteItem,
+        configuration: AppConfiguration,
+        vaultAccess: VaultAccess
+    ) -> TimeInterval? {
+        let duration = try? vaultAccess.withVaultAccess { vaultRootURL -> TimeInterval? in
+            let audioURL = audioFileURL(
+                for: item,
+                audioRelativePath: configuration.audioRelativePath,
+                vaultRootURL: vaultRootURL
+            )
+            guard FileManager.default.fileExists(atPath: audioURL.path) else { return nil }
+            guard let file = try? AVAudioFile(forReading: audioURL) else { return nil }
+            let format = file.fileFormat
+            guard format.sampleRate > 0 else { return nil }
+            return TimeInterval(Double(file.length) / format.sampleRate)
+        }
+        return duration ?? nil
+    }
+
+    nonisolated private static func audioFileURL(
+        for item: MeetingNoteItem,
+        audioRelativePath: String,
+        vaultRootURL: URL
+    ) -> URL {
+        vaultRootURL
+            .appendingPathComponent(audioRelativePath)
+            .appendingPathComponent("\(item.fileURL.deletingPathExtension().lastPathComponent).wav")
+    }
+
+    nonisolated private static func makeVaultAccess() -> VaultAccess {
+        let defaults = UserDefaults.standard
+        let bookmarkStore = UserDefaultsVaultBookmarkStore(
+            defaults: defaults,
+            key: AppConfiguration.Defaults.vaultRootBookmarkKey
+        )
+        return VaultAccess(bookmarkStore: bookmarkStore)
     }
 }

@@ -1,4 +1,3 @@
-import AppKit
 import MarkdownUI
 import SwiftUI
 
@@ -15,17 +14,20 @@ struct MarkdownViewerOverlay: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
             bodyContent
         }
-        .background(Color(nsColor: NSColor.windowBackgroundColor))
         .onExitCommand(perform: onClose)
     }
 
     private var header: some View {
         HStack {
             Text(title.isEmpty ? "Meeting Note" : title)
-                .font(.title3.bold())
+                .font(.system(size: 18, weight: .semibold))
+                .tracking(-0.3)
+                .foregroundStyle(Color.minuteTextPrimary)
                 .lineLimit(1)
 
             Spacer()
@@ -39,12 +41,16 @@ struct MarkdownViewerOverlay: View {
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.headline)
-                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.minuteTextSecondary)
                     .frame(width: 28, height: 28)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(nsColor: NSColor.controlBackgroundColor))
+                        Circle()
+                            .fill(Color.minuteSurface)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.minuteOutline, lineWidth: 1)
+                            )
                     )
             }
             .buttonStyle(.plain)
@@ -59,15 +65,13 @@ struct MarkdownViewerOverlay: View {
             VStack(spacing: 12) {
                 ProgressView()
                 Text("Loading note…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .minuteCaption()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
         } else if let errorMessage {
             VStack(spacing: 12) {
                 Text(errorMessage)
-                    .font(.callout)
                     .foregroundStyle(.red)
 
                 Button("Retry") {
@@ -81,7 +85,6 @@ struct MarkdownViewerOverlay: View {
             ScrollView {
                 if renderPlainText {
                     Text(content)
-                        .font(.callout)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 } else {
@@ -90,11 +93,11 @@ struct MarkdownViewerOverlay: View {
                 }
             }
             .font(.callout)
+            .foregroundStyle(Color.minuteTextPrimary)
             .padding(20)
         } else {
             Text("No content available.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .minuteCaption()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(24)
         }

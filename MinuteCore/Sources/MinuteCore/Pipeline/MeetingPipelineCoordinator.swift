@@ -107,11 +107,7 @@ public actor MeetingPipelineCoordinator {
             logger.info("Pipeline cancelled")
             throw CancellationError()
         } catch {
-            if let minuteError = error as? MinuteError {
-                logger.error("Pipeline failed: \(minuteError.debugSummary, privacy: .public)")
-            } else {
-                logger.error("Pipeline failed: \(String(describing: error), privacy: .public)")
-            }
+            logger.error("Pipeline failed: \(ErrorHandler.debugMessage(for: error), privacy: .public)")
             cleanupTemporaryArtifacts(for: context)
             throw error
         }
@@ -189,6 +185,7 @@ public actor MeetingPipelineCoordinator {
         let noteMarkdown = MarkdownRenderer().render(
             extraction: extraction,
             noteDateTime: processedDateTime,
+            audioDurationSeconds: context.audioDurationSeconds,
             audioRelativePath: audioRelativePath,
             transcriptRelativePath: transcriptRelativePath
         )
@@ -225,7 +222,7 @@ public actor MeetingPipelineCoordinator {
         do {
             return try await diarizationService.diarize(wavURL: wavURL)
         } catch {
-            logger.error("Diarization failed: \(String(describing: error), privacy: .public)")
+            logger.error("Diarization failed: \(ErrorHandler.debugMessage(for: error), privacy: .public)")
             return []
         }
     }

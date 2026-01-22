@@ -3,26 +3,27 @@ import ScreenCaptureKit
 import SwiftUI
 
 struct ScreenContextSettingsSection: View {
-    @AppStorage(AppDefaultsKey.screenContextEnabled) private var screenContextEnabled: Bool = false
-    @AppStorage(AppDefaultsKey.screenContextVideoImportEnabled) private var videoImportEnabled: Bool = false
-    @AppStorage(AppDefaultsKey.screenContextCaptureIntervalSeconds) private var captureIntervalSeconds: Double = 60
+    @AppStorage(AppDefaultsKey.screenContextEnabled)
+    private var screenContextEnabled: Bool = AppConfiguration.Defaults.defaultScreenContextEnabled
+    @AppStorage(AppDefaultsKey.screenContextVideoImportEnabled)
+    private var videoImportEnabled: Bool = AppConfiguration.Defaults.defaultScreenContextVideoImportEnabled
+    @AppStorage(AppDefaultsKey.screenContextCaptureIntervalSeconds)
+    private var captureIntervalSeconds: Double = AppConfiguration.Defaults.defaultScreenContextCaptureIntervalSeconds
 
     var body: some View {
         Section("Screen Context") {
-            Toggle("Enhance notes with selected screen content", isOn: $screenContextEnabled)
-                .toggleStyle(.switch)
-                .tint(.accentColor)
-
-            Text("Choose a window each time you start recording. No video is stored.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsToggleRow(
+                "Enhance notes with selected screen content",
+                detail: "Choose a window each time you start recording. No video is stored.",
+                isOn: $screenContextEnabled
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("Capture interval")
                     Spacer()
                     Text(intervalLabel)
-                        .foregroundStyle(.secondary)
+                        .minuteCaption()
                 }
 
                 Slider(value: captureIntervalIndex, in: 0...Double(Self.captureIntervals.count - 1), step: 1)
@@ -32,8 +33,7 @@ struct ScreenContextSettingsSection: View {
                     ForEach(Self.captureIntervals.indices, id: \.self) { index in
                         let value = Self.captureIntervals[index]
                         Text(Self.label(for: value))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .minuteCaption()
                         if index < Self.captureIntervals.count - 1 {
                             Spacer()
                         }
@@ -41,13 +41,11 @@ struct ScreenContextSettingsSection: View {
                 }
             }
 
-            Toggle("Enhance video imports with frame text", isOn: $videoImportEnabled)
-                .toggleStyle(.switch)
-                .tint(.accentColor)
-
-            Text("When enabled, video imports are sampled for on-screen text.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsToggleRow(
+                "Enhance video imports with frame text",
+                detail: "When enabled, video imports are sampled for on-screen text.",
+                isOn: $videoImportEnabled
+            )
         }
     }
 

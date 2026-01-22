@@ -1,26 +1,23 @@
+import MinuteCore
 import SwiftUI
 
 struct GeneralSettingsSection: View {
-    @AppStorage(AppDefaultsKey.saveAudio) private var saveAudio: Bool = true
-    @AppStorage(AppDefaultsKey.saveTranscript) private var saveTranscript: Bool = true
+    @AppStorage(AppDefaultsKey.saveAudio) private var saveAudio: Bool = AppConfiguration.Defaults.defaultSaveAudio
+    @AppStorage(AppDefaultsKey.saveTranscript) private var saveTranscript: Bool = AppConfiguration.Defaults.defaultSaveTranscript
 
     var body: some View {
         Section("Options") {
-            Toggle("Save audio", isOn: $saveAudio)
-                .toggleStyle(.switch)
-                .tint(.accentColor)
+            SettingsToggleRow(
+                "Save audio",
+                detail: "When off, audio is not saved to the vault or linked in the note.",
+                isOn: $saveAudio
+            )
 
-            Text("When off, audio is not saved to the vault or linked in the note.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Save transcript", isOn: $saveTranscript)
-                .toggleStyle(.switch)
-                .tint(.accentColor)
-
-            Text("When off, the transcript file and link are omitted from the note.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SettingsToggleRow(
+                "Save transcript",
+                detail: "When off, the transcript file and link are omitted from the note.",
+                isOn: $saveTranscript
+            )
         }
     }
 }

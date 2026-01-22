@@ -9,11 +9,13 @@ public struct MarkdownRenderer: Sendable {
     public func render(
         extraction: MeetingExtraction,
         noteDateTime: String,
+        audioDurationSeconds: TimeInterval?,
         audioRelativePath: String?,
         transcriptRelativePath: String?
     ) -> String {
-        let title = normalizedTitle(extraction.title)
+        let title = StringNormalizer.normalizeTitle(extraction.title)
         let date = noteDateTime
+        let length = Self.formatDuration(audioDurationSeconds)
 
         var lines: [String] = []
         lines.reserveCapacity(64)
@@ -22,8 +24,11 @@ public struct MarkdownRenderer: Sendable {
         lines.append("---")
         lines.append("type: meeting")
         lines.append("date: \(date)")
-        lines.append("title: \(yamlDoubleQuoted(title))")
+        lines.append("title: \(StringNormalizer.yamlDoubleQuoted(title))")
         lines.append("source: \"Minute\"")
+        if let length {
+            lines.append("length: \(length)")
+        }
         lines.append("tags:")
         lines.append("---")
         lines.append("")
@@ -33,7 +38,7 @@ public struct MarkdownRenderer: Sendable {
         lines.append("")
 
         lines.append("## Summary")
-        lines.append(normalizeParagraph(extraction.summary))
+        lines.append(StringNormalizer.normalizeParagraph(extraction.summary))
         lines.append("")
 
         lines.append("## Decisions")
@@ -69,7 +74,7 @@ public struct MarkdownRenderer: Sendable {
 
     private func appendBullets(_ items: [String], to lines: inout [String]) {
         let cleaned = items
-            .map { normalizeInline($0) }
+            .map { StringNormalizer.normalizeInline($0) }
             .filter { !$0.isEmpty }
 
         if cleaned.isEmpty {
@@ -84,7 +89,12 @@ public struct MarkdownRenderer: Sendable {
 
     private func appendActionItems(_ items: [ActionItem], to lines: inout [String]) {
         let cleaned = items
-            .map { ActionItem(owner: normalizeInline($0.owner), task: normalizeInline($0.task)) }
+            .map {
+                ActionItem(
+                    owner: StringNormalizer.normalizeInline($0.owner),
+                    task: StringNormalizer.normalizeInline($0.task)
+                )
+            }
             .filter { !$0.task.isEmpty || !$0.owner.isEmpty }
 
         if cleaned.isEmpty {
@@ -100,34 +110,19 @@ public struct MarkdownRenderer: Sendable {
         }
     }
 
-    private func yamlDoubleQuoted(_ value: String) -> String {
-        // YAML double-quoted string escaping.
-        var escaped = value
-        escaped = escaped.replacingOccurrences(of: "\\", with: "\\\\")
-        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
-        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
-        return "\"\(escaped)\""
+    private static func formatDuration(_ seconds: TimeInterval?) -> String? {
+        guard let seconds, seconds > 0 else { return nil }
+        let totalMinutes = max(1, Int((seconds / 60.0).rounded()))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+
+        if hours > 0 {
+            if minutes == 0 {
+                return "\(hours)h"
+            }
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(totalMinutes)m"
     }
 
-    private func normalizeParagraph(_ value: String) -> String {
-        // Keep paragraphs as-is but normalize line endings and trim.
-        value
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func normalizeInline(_ value: String) -> String {
-        // Normalize to a single-line, trimmed string.
-        normalizeParagraph(value)
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\t", with: " ")
-            .replacingOccurrences(of: "  ", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func normalizedTitle(_ value: String) -> String {
-        let title = normalizeInline(value)
-        return title.isEmpty ? "Untitled" : title
-    }
 }
