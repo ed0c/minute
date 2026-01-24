@@ -17,7 +17,7 @@ struct ContentView: View {
         Group {
             contentBody
         }
-        .frame(minWidth: 860, minHeight: 520)
+        .frame(minWidth: 860, minHeight: 620)
         .background(MinuteTheme.backgroundGradient)
         .tint(Color.minuteGlow)
         .onAppear { onboardingModel.refreshAll() }
@@ -50,54 +50,68 @@ private struct PipelineContentView: View {
     @State private var screenPickerPurpose: ScreenPickerPurpose?
     @State private var screenTogglePending = false
     @State private var screenPickerHandled = false
+    private let compactHeightThreshold: CGFloat = 620
+    private let floatingBarHeight: CGFloat = 88
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            HStack(spacing: 0) {
-                MeetingNotesSidebarView(model: notesModel)
+        GeometryReader { proxy in
+            let isCompactLayout = proxy.size.height < compactHeightThreshold
 
-             
+            ZStack(alignment: .bottom) {
+                HStack(spacing: 0) {
+                    MeetingNotesSidebarView(model: notesModel)
 
-                mainStage
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    mainStage(bottomInset: mainStageBottomInset(isCompact: isCompactLayout))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .background(MinuteTheme.backgroundGradient)
+                .overlay(dropOverlay)
+
+                floatingControlBar
+                    .padding(.bottom, isCompactLayout ? 12 : 22)
+
+                if let status = statusDrawerModel {
+                    StatusDrawerView(model: status, isCompact: isCompactLayout)
+                        .frame(maxWidth: 560)
+                        .padding(.bottom, statusDrawerBottomPadding(isCompact: isCompactLayout))
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.2), value: statusDrawerModel != nil)
+                }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+            .clipped()
             .background(MinuteTheme.backgroundGradient)
-            .overlay(dropOverlay)
-
-            floatingControlStack
-                .padding(.bottom, 22)
-        }
-        .background(MinuteTheme.backgroundGradient)
-        .onAppear {
-            model.refreshVaultStatus()
-            notesModel.refresh()
-        }
-        .onReceive(model.$state) { newState in
-            if case .done = newState {
+            .onAppear {
+                model.refreshVaultStatus()
                 notesModel.refresh()
             }
-        }
-        .contentShape(Rectangle())
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
-            handleDrop(providers)
-        }
-        .fileImporter(isPresented: $isImportingFile, allowedContentTypes: [.audio, .movie]) { result in
-            switch result {
-            case .success(let url):
-                importFile(url)
-            case .failure:
-                break
+            .onReceive(model.$state) { newState in
+                if case .done = newState {
+                    notesModel.refresh()
+                }
             }
-        }
-        .sheet(isPresented: $isRecordingWindowPickerPresented) {
-            ScreenContextRecordingPickerView { selection in
-                screenPickerHandled = true
-                handleScreenSelection(selection)
+            .contentShape(Rectangle())
+            .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
+                handleDrop(providers)
             }
-            .onDisappear(perform: handleScreenPickerDismiss)
-        }
-        .onChange(of: screenContextEnabled) { newValue in
-            handleScreenContextSettingChange(newValue)
+            .fileImporter(isPresented: $isImportingFile, allowedContentTypes: [.audio, .movie]) { result in
+                switch result {
+                case .success(let url):
+                    importFile(url)
+                case .failure:
+                    break
+                }
+            }
+            .sheet(isPresented: $isRecordingWindowPickerPresented) {
+                ScreenContextRecordingPickerView { selection in
+                    screenPickerHandled = true
+                    handleScreenSelection(selection)
+                }
+                .onDisappear(perform: handleScreenPickerDismiss)
+            }
+            .onChange(of: screenContextEnabled) { _, newValue in
+                handleScreenContextSettingChange(newValue)
+            }
         }
     }
 
@@ -122,7 +136,7 @@ private struct PipelineContentView: View {
         }
     }
 
-    private var mainStage: some View {
+    private func mainStage(bottomInset: CGFloat) -> some View {
         MainStageContainer {
             if notesModel.isOverlayPresented {
                 MarkdownViewerOverlay(
@@ -139,33 +153,26 @@ private struct PipelineContentView: View {
                 MainStageView(
                     model: model,
                     notesModel: notesModel,
-                    bottomInset: mainStageBottomInset
+                    bottomInset: bottomInset
                 )
             }
         }
     }
 
-    private var floatingControlStack: some View {
-        VStack(spacing: 10) {
-            if let status = statusDrawerModel {
-                StatusDrawerView(model: status)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            FloatingControlBar(
-                recordState: recordButtonState,
-                recordEnabled: recordButtonEnabled,
-                audioMode: audioCaptureMode,
-                isScreenShareOn: isScreenToggleOn,
-                showsScreenShareControl: screenContextEnabled,
-                controlsEnabled: captureTogglesEnabled,
-                uploadEnabled: model.state.canImportMedia,
-                onRecordTap: handleRecordButtonTap,
-                onAudioModeChange: setAudioCaptureMode,
-                onScreenShareToggle: { handleScreenToggleChange(!isScreenToggleOn) },
-                onUploadTap: { isImportingFile = true }
-            )
-        }
+    private var floatingControlBar: some View {
+        FloatingControlBar(
+            recordState: recordButtonState,
+            recordEnabled: recordButtonEnabled,
+            audioMode: audioCaptureMode,
+            isScreenShareOn: isScreenToggleOn,
+            showsScreenShareControl: screenContextEnabled,
+            controlsEnabled: captureTogglesEnabled,
+            uploadEnabled: model.state.canImportMedia,
+            onRecordTap: handleRecordButtonTap,
+            onAudioModeChange: setAudioCaptureMode,
+            onScreenShareToggle: { handleScreenToggleChange(!isScreenToggleOn) },
+            onUploadTap: { isImportingFile = true }
+        )
         .frame(maxWidth: 560)
         .animation(.easeInOut(duration: 0.2), value: statusDrawerModel != nil)
     }
@@ -278,7 +285,7 @@ private struct PipelineContentView: View {
         case .processing, .writing, .importing:
             return StatusDrawerModel(
                 title: model.state.statusLabel,
-                detail: "Working locally. You can keep browsing notes.",
+                detail: "Meeting is being processed.",
                 progress: model.progress,
                 showsActivity: model.progress == nil,
                 isError: false,
@@ -310,10 +317,16 @@ private struct PipelineContentView: View {
         }
     }
 
-    private var mainStageBottomInset: CGFloat {
-        let base: CGFloat = 104
-        let statusExtra: CGFloat = statusDrawerModel == nil ? 0 : 84
+    private func mainStageBottomInset(isCompact: Bool) -> CGFloat {
+        let base: CGFloat = isCompact ? 88 : 104
+        let statusExtra: CGFloat = statusDrawerModel == nil ? 0 : (isCompact ? 64 : 84)
         return base + statusExtra
+    }
+
+    private func statusDrawerBottomPadding(isCompact: Bool) -> CGFloat {
+        let spacing: CGFloat = isCompact ? 6 : 10
+        let bottomPadding: CGFloat = isCompact ? 12 : 22
+        return bottomPadding + floatingBarHeight + spacing
     }
 
     private func handleRecordButtonTap() {
@@ -572,10 +585,11 @@ private struct StatusDrawerModel {
 
 private struct StatusDrawerView: View {
     let model: StatusDrawerModel
+    let isCompact: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: isCompact ? 4 : 6) {
                 Text(model.title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(model.isError ? Color.red.opacity(0.9) : Color.minuteTextPrimary)
@@ -583,6 +597,8 @@ private struct StatusDrawerView: View {
                 Text(model.detail)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.minuteTextSecondary)
+                    .lineLimit(isCompact ? 1 : nil)
+                    .truncationMode(.tail)
 
                 if let progress = model.progress {
                     ProgressView(value: progress)
@@ -602,7 +618,7 @@ private struct StatusDrawerView: View {
                 .minuteStandardButtonStyle()
             }
         }
-        .padding(12)
+        .padding(isCompact ? 10 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .minuteGlassPanel(
             cornerRadius: 16,
