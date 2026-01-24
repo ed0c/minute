@@ -45,5 +45,5 @@ if /usr/bin/otool -L "$SOURCE" | /usr/bin/grep -E "/opt/homebrew|/usr/local" >/d
 fi
 
 if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-  /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$DEST"
+  /usr/bin/codesign --force --timestamp --options runtime --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$DEST"
 fi
