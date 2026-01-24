@@ -36,24 +36,47 @@
 - Enriches notes with optional screen context captures during recording.
 - Live waveform and live transcript during recording.
 
-## Output Contract
-Exactly three artifacts are written per processed meeting:
-- `Meetings/YYYY/MM/YYYY-MM-DD HH.MM - <Title>.md`
-- `Meetings/_audio/YYYY-MM-DD HH.MM - <Title>.wav`
-- `Meetings/_transcripts/YYYY-MM-DD HH.MM - <Title>.md`
-
-WAV format: mono, 16 kHz, 16-bit PCM.
-
-Frontmatter example:
+Output example:
 ```
 ---
 type: meeting
 date: Jan 19, 2026 at 11:39
-title: "PIE2E and 3DBanken Progress Update"
+title: "Zoom Kitten Filter Incident - 27th Judicial District"
 source: "Minute"
 length: 35m
 tags:
 ---
+
+---
+type: meeting
+date: Jan 22, 2026 at 21:46
+title: "Zoom Kitten Filter Incident - 27th Judicial District"
+source: "Minute"
+length: 1m
+tags:
+---
+
+# Zoom Kitten Filter Incident - 27th Judicial District
+
+## Summary
+During a court hearing in the 27th Judicial District, Rod Ponton experienced a persistent Zoom kitten filter on his video feed. Despite attempts to remove it with assistance from his assistant, the issue remained unresolved. The judge highlighted the potential for recording violations and issued a warning about prohibited recordings. No formal decisions were made regarding the filter.
+
+## Decisions
+
+## Action Items
+- [ ] Ensure Zoom video settings are configured correctly to prevent filter activation. (Owner: Rod Ponton)
+
+## Open Questions
+- What specific steps were taken to remove the filter?
+
+## Key Points
+- A Zoom kitten filter was present during the court hearing.
+- The judge cautioned against recording the proceedings.
+- Mr. Ponton was unable to resolve the filter issue independently.
+
+## Transcript
+[[Meetings/_transcripts/2026-01-22 20.45 - Zoom Kitten Filter Incident - 27th Judicial District.md]]
+
 ```
 
 ## Requirements
