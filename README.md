@@ -40,15 +40,6 @@ Output example:
 ```
 ---
 type: meeting
-date: Jan 19, 2026 at 11:39
-title: "Zoom Kitten Filter Incident - 27th Judicial District"
-source: "Minute"
-length: 35m
-tags:
----
-
----
-type: meeting
 date: Jan 22, 2026 at 21:46
 title: "Zoom Kitten Filter Incident - 27th Judicial District"
 source: "Minute"
