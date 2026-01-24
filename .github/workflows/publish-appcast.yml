@@ -1,11 +1,13 @@
 name: Publish Sparkle Appcast
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - appcast.xml
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to publish appcast from (tag, branch, or SHA)"
+        required: false
 
 permissions:
   contents: read
@@ -16,6 +18,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || 'main' }}
 
       - name: Ensure publish token is configured
         run: |

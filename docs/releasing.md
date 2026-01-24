@@ -47,7 +47,7 @@ You still commit the appcast and publish the assets.
 
 ## CI: publish appcast only
 Workflow: `.github/workflows/publish-appcast.yml`
-- Trigger: push to `main` when `appcast.xml` changes
+- Trigger: release published (or manual dispatch)
 - Action: copy appcast to `roblibob/roblibob.github.io/appcast.xml`
 - Secret required: `APPCAST_PUBLISH_TOKEN` (PAT with write access to the pages repo)
 

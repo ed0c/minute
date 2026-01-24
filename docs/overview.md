@@ -1,269 +1,96 @@
-Minute — Native macOS Solution Design (v1)
+Minute Overview
 
-Goal
+Minute is a native macOS app for capturing meetings locally and writing
+deterministic notes into a user-selected Obsidian vault. It records audio,
+transcribes with Whisper, summarizes with Llama, and writes a fixed set of
+artifacts to the vault.
 
-Ship a coworker‑friendly native macOS companion app that:
-	•	Records a meeting (mic input)
-	•	Transcribes locally
-	•	Generates a meeting note locally
-	•	Writes exactly three artifacts into a user‑selected Obsidian vault:
-	•	a Markdown note (.md)
-	•	a WAV audio file (.wav)
-	•	a transcript Markdown file (.md)
+What the app does
+- Record microphone + system audio locally.
+- Transcribe audio locally (whisper.cpp).
+- Summarize locally with a JSON-only LLM prompt (llama.cpp).
+- Render a deterministic Markdown note from JSON.
+- Write exactly three files to the vault per meeting.
 
-No other integrations are required for v1.
+Core output contract (v1)
+The app always writes exactly three files for a processed meeting:
+- Meetings/YYYY/MM/YYYY-MM-DD HH.MM - <Title>.md
+- Meetings/_audio/YYYY-MM-DD HH.MM - <Title>.wav
+- Meetings/_transcripts/YYYY-MM-DD HH.MM - <Title>.md
 
-⸻
+Audio format: mono, 16 kHz, 16-bit PCM WAV.
 
-Fixed v1 output contract
+Note structure (deterministic)
+- YAML frontmatter with fixed schema.
+- Sections: Summary, Decisions, Action Items, Open Questions, Key Points.
+- Links to the audio and transcript files in the vault.
 
-File locations
-	•	Markdown note:
-	•	Meetings/YYYY/MM/YYYY-MM-DD HH.MM - <Title>.md
-	•	Audio:
-	•	Meetings/_audio/YYYY-MM-DD HH.MM - <Title>.wav
-	•	Transcript:
-	•	Meetings/_transcripts/YYYY-MM-DD HH.MM - <Title>.md
-
-The WAV must be mono, 16 kHz, 16‑bit PCM.
-
-Note contents
-
-The note is fully deterministic in structure and contains:
-	•	YAML frontmatter
-	•	Sections: Summary, Decisions, Action Items, Open Questions, Key Points
-	•	A link to the WAV file stored in the vault
-	•	A length field (recording duration) in the frontmatter
-
-Frontmatter (fixed schema)
-
----
-type: meeting
-date: Jan 19, 2026 at 11:39
-title: "<Title>"
-source: "Minute"
-length: 35m
-tags:
----
-
-Body template (fixed)
-
-# <Title>
-
-## Summary
-<generated summary>
-
-## Decisions
-- <decision 1>
-
-## Action Items
-- [ ] <action item> (Owner: <name>)
-
-## Open Questions
-- <question 1>
-
-## Key Points
-- <point 1>
-
-## Audio
-[[Meetings/_audio/YYYY-MM-DD HH.MM - <Title>.wav]]
-
-## Transcript
-[[Meetings/_transcripts/YYYY-MM-DD HH.MM - <Title>.md]]
-
-The transcript is written as its own Markdown file and linked from the note.
-
-⸻
-
-Recommended path: fully native macOS app
-
-Technology choices (fixed)
-	•	App: Swift + SwiftUI (macOS 14+ recommended)
-	•	Audio capture: AVFoundation (mic) + ScreenCaptureKit (system audio)
-	•	Audio format: WAV, mono, 16 kHz, 16‑bit PCM (stored in vault)
-	•	Transcription: whisper.cpp (library, in an XPC helper)
-	•	LLM summarization: llama.cpp (library, Metal‑accelerated build where possible)
-	•	Model format: GGUF (downloaded by the app on first run)
-	•	Templating: deterministic Markdown renderer (no “model writes markdown”)
-	•	The app does not depend on Ollama.
-
-⸻
-
-User experience
-
-First run
-	1.	User selects their Obsidian vault root folder.
-	2.	User sets Meeting folder and audio folder, e.g.:
-	•	Meetings/
-	•	Meetings/_audio/
-	3.	Minute downloads required model weights into:
-	•	~/Library/Application Support/Minute/models/
-	4.	Minute requests microphone and screen recording permissions.
-
-Daily use
-	•	Click Start Recording
-	•	Click Stop
-	•	Click Process
-
-A new note appears in Meetings/… and the audio appears in Meetings/_audio/….
-
-⸻
-
-Processing pipeline (v1)
-
+How the app works (pipeline)
 1) Record
-	•	Record microphone + system audio into temporary files.
-	•	On stop, mix and convert/export to WAV mono 16 kHz and copy into the vault under Meetings/_audio/.
+   - Capture mic + system audio into temporary files.
+   - Mix and convert to the contract WAV format.
+2) Transcribe
+   - Run whisper.cpp on the WAV file.
+   - Write transcript markdown to Meetings/_transcripts/.
+3) Summarize
+   - Run llama.cpp with a JSON-only prompt.
+   - Validate JSON; if invalid, run a single repair pass.
+   - If still invalid, emit a fallback note with empty sections.
+4) Render
+   - Convert validated JSON to deterministic Markdown.
+5) Write
+   - Atomically write the note and audio into the vault.
 
-2) Transcribe (local)
-	•	Run whisper.cpp against the WAV file.
-	•	Write a transcript Markdown file into the vault under Meetings/_transcripts/.
+State model
+Single pipeline state machine:
+idle -> recording -> recorded -> processing(transcribe) -> processing(summarize)
+-> writing -> done | failed
 
-3) Summarize + extract structure (local)
-	•	Run llama.cpp with a JSON‑only prompt.
-	•	Output must be valid JSON matching the fixed schema below.
+Permissions and privacy
+- The app is sandboxed and uses security-scoped bookmarks for the vault.
+- All audio and inference runs locally.
+- The only network access is for downloading model weights.
+- No transcript content is logged by default.
 
-Extraction JSON schema (fixed)
+Storage locations
+- Vault: user-selected Obsidian vault root (files written only within this tree).
+- Models: ~/Library/Application Support/Minute/models/
+- App support: ~/Library/Application Support/Minute/
 
-{
-  "title": "",
-  "date": "YYYY-MM-DD",
-  "summary": "",
-  "decisions": [""],
-  "action_items": [{"owner":"","task":""}],
-  "open_questions": [""],
-  "key_points": ["" ]
-}
+Technology snapshot
+- UI: SwiftUI (macOS 14+)
+- Audio: AVFoundation + ScreenCaptureKit
+- Transcription: whisper.cpp (library, XPC helper)
+- Summarization: llama.cpp (library)
+- Markdown: deterministic renderer (model outputs JSON only)
 
-4) Validate and repair
+Code structure
+- Minute/ (app target, SwiftUI UI + app orchestration)
+- MinuteCore/ (shared domain + services; non-UI logic)
+- MinuteWhisperService/ (XPC helper for whisper)
+- Vendor/ (bundled binaries like ffmpeg)
+- scripts/ (release, notarization, appcast tooling)
+- docs/ (product and release docs)
 
-If JSON parse fails:
-	1.	Run a single “repair JSON” pass with llama.cpp.
-	2.	If still invalid, generate a fallback note with:
-	•	Summary: Failed to structure output; see audio for details.
-	•	Empty sections.
+Architecture
+UI stays thin; business logic lives in MinuteCore. The pipeline is a single
+source-of-truth state machine. Models only emit JSON; Markdown is rendered
+deterministically.
 
-5) Render Markdown (deterministic)
-	•	Minute renders the Markdown note using the fixed template.
-	•	The model never writes Markdown; it only produces JSON.
+Core module boundaries (MinuteCore)
+- Domain/types: schemas, file contracts, errors
+- Services: audio, transcription, summarization, vault access, model management
+- Rendering: deterministic Markdown renderer
+- Utilities: validation + JSON repair
 
-6) Write to vault atomically
-	•	Write to a temporary file in the same folder and then rename.
+Service flow
+UI -> MeetingPipelineViewModel -> services -> vault writer
 
-⸻
+Concurrency
+- Long-running work uses async/await and supports cancellation.
+- Only UI updates run on MainActor.
 
-App architecture
-
-Targets / modules
-	1.	MinuteApp (UI)
-	•	SwiftUI views
-	•	State machine
-	•	Progress UI and failure states
-	2.	Permissions
-	•	Microphone permission gating + messaging
-	3.	VaultAccess
-	•	Folder selection + sandbox-safe access via security‑scoped bookmarks
-	4.	AudioService
-	•	Capture → convert/export → final WAV path
-	5.	TranscriptionService
-	•	Runs whisper.cpp and returns transcript (in memory / temp only)
-	6.	SummarizationService
-	•	Runs llama.cpp JSON‑only prompt → returns JSON
-	7.	Validation & Repair
-	•	Strict JSON parsing → single repair → fallback
-	8.	MarkdownRenderer
-	•	Deterministic Markdown from validated schema
-	9.	VaultWriter
-	•	Atomic writes and directory creation
-
-State machine (single source of truth)
-
-idle → recording → recorded → processing(transcribe) → processing(summarize) → writing → done | failed
-
-⸻
-
-Sandboxing & vault access (macOS)
-
-To work reliably with notarization + App Sandbox:
-	•	Use NSOpenPanel to select the vault root folder.
-	•	Persist a security‑scoped bookmark for the vault root.
-	•	Before any read/write in the vault:
-	•	startAccessingSecurityScopedResource()
-	•	do work
-	•	stopAccessingSecurityScopedResource()
-
-Minute only reads/writes within:
-	•	the selected vault folder
-	•	~/Library/Application Support/Minute/…
-
-⸻
-
-Model management
-
-Bundled libraries
-	•	whisper.cpp (library, hosted in an XPC helper)
-	•	llama.cpp (library)
-	•	ffmpeg (optional executable; used only if AVFoundation export is insufficient for deterministic 16 kHz mono output)
-
-Downloaded model weights (first run)
-
-Stored under:
-	•	~/Library/Application Support/Minute/models/
-
-Defaults (fixed):
-	•	Whisper model: base.en (whisper.cpp compatible)
-	•	LLM model: qwen2.5-7b-instruct GGUF quantized (Q4)
-
-Download rules:
-	•	No network calls except downloading model weights from a pinned, checksum‑verified source.
-
-⸻
-
-Development plan
-
-Phase 0 — Scaffold
-	•	Create Xcode SwiftUI app + MinuteCore Swift Package
-	•	Implement vault selection + bookmark persistence
-	•	Settings UI (Meetings folder + audio folder relative to vault)
-	•	Basic Start/Stop/Process screen with state machine
-
-Phase 1 — Audio
-	•	Implement AudioService
-	•	Verify output WAV constraints (mono, 16 kHz, 16‑bit PCM)
-
-Phase 2 — Transcription
-	•	Integrate whisper.cpp via library + XPC helper
-	•	Deterministic output handling + cancellation + errors
-
-Phase 3 — Summarization
-	•	Integrate llama.cpp via library
-	•	JSON‑only prompt + one repair pass
-
-Phase 4 — Deterministic note writing
-	•	Schema validation + fallback
-	•	Deterministic Markdown renderer
-	•	Atomic vault writes
-
-Phase 5 — Packaging
-	•	Hardened Runtime + sandbox
-	•	Code signing + notarization
-	•	Signed .dmg distribution
-
-⸻
-
-Security & privacy
-	•	Audio and inference stay local.
-	•	Minute makes no outbound requests except model downloads.
-	•	Transcript is written to the vault as its own Markdown file.
-
-⸻
-
-Deliverables (v1)
-	•	A signed, notarized .dmg containing Minute.app
-
-Install steps:
-	1.	Drag Minute.app to Applications
-	2.	Open Minute, select vault
-	3.	Grant microphone permission
-	4.	Wait for model download (first run only)
-	5.	Record → Stop → Process → exactly three files appear in the vault
+Non-goals (v1)
+- Cloud transcription or summarization
+- Non-deterministic note formatting
+- Additional integrations beyond the Obsidian vault

@@ -11,20 +11,18 @@ Hard requirements:
 - Transcription runs locally (whisper)
 - Summarization runs locally (llama)
 - Exactly three files are written to the selected Obsidian vault per processed meeting:
-  - Markdown note: `Meetings/YYYY/MM/YYYY-MM-DD - <Title>.md`
-  - WAV audio: `Meetings/_audio/YYYY-MM-DD - <Title>.wav`
-  - Transcript Markdown: `Meetings/_transcripts/YYYY-MM-DD - <Title>.md`
+  - Markdown note: `Meetings/YYYY/MM/YYYY-MM-DD HH.MM - <Title>.md`
+  - WAV audio: `Meetings/_audio/YYYY-MM-DD HH.MM - <Title>.wav`
+  - Transcript Markdown: `Meetings/_transcripts/YYYY-MM-DD HH.MM - <Title>.md`
 - WAV format must be mono, 16 kHz, 16-bit PCM
 - No outbound network calls except model downloads
 
 ## Repository structure
 - `Minute/` — App target (SwiftUI)
 - `Minute.xcodeproj/` — Xcode project
+- `MinuteCore/` — Swift Package (non-UI logic, services, rendering, contracts)
 - `docs/` — Product docs
 - `docs/tasks/` — Execution-ordered implementation plan
-
-Planned addition:
-- `MinuteCore/` (Swift Package) — non-UI logic, services, rendering, contracts
 
 ## Architecture guidance
 Follow the plan in `docs/tasks/`.
@@ -140,3 +138,4 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
   - Run the manual QA checklist
   - Validate sandbox + security-scoped bookmark flows
   - Validate that only model downloads touch the network
+  - Follow `docs/releasing.md` for notarization, appcast, and Homebrew updates
