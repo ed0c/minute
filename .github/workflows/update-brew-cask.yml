@@ -62,26 +62,26 @@ jobs:
           SHA: ${{ steps.sha.outputs.sha }}
         run: |
           cat <<EOF > "tap/Casks/minute.rb"
-cask "minute" do
-  version "${VERSION}"
-  sha256 "${SHA}"
+          cask "minute" do
+            version "${VERSION}"
+            sha256 "${SHA}"
 
-  url "https://github.com/roblibob/Minute/releases/download/v#{version}/Minute-#{version}.dmg"
-  name "Minute"
-  desc "Local-first meeting recorder with transcription and summaries"
-  homepage "https://github.com/roblibob/Minute"
+            url "https://github.com/roblibob/Minute/releases/download/v#{version}/Minute-#{version}.dmg"
+            name "Minute"
+            desc "Local-first meeting recorder with transcription and summaries"
+            homepage "https://github.com/roblibob/Minute"
 
-  auto_updates true
-  depends_on macos: ">= :sonoma"
+            auto_updates true
+            depends_on macos: ">= :sonoma"
 
-  app "Minute.app"
+            app "Minute.app"
 
-  zap trash: [
-    "~/Library/Application Support/Minute",
-    "~/Library/Preferences/com.roblibob.Minute.plist",
-  ]
-end
-EOF
+            zap trash: [
+              "~/Library/Application Support/Minute",
+              "~/Library/Preferences/com.roblibob.Minute.plist",
+            ]
+          end
+          EOF
 
       - name: Commit and push
         run: |
