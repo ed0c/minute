@@ -27,6 +27,17 @@
   <img src="docs/minute.gif" alt="Minute demo" width="820">
 </p>
 
+## Install (Homebrew)
+```
+brew tap roblibob/minute
+brew install --cask minute
+```
+
+## Install (Manual)
+1. Download the latest DMG from GitHub Releases.
+2. Open the DMG and drag `Minute.app` into Applications.
+3. Launch Minute from Applications.
+
 ## Key Features
 - Records audio locally (mic + system audio).
 - Transcribes locally with Whisper.

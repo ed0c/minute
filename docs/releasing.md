@@ -29,8 +29,9 @@ publishes the Sparkle appcast to GitHub Pages.
    - `updates/Minute-<version>.dmg`
    - `updates/Minute-<version>.zip`
 
-6. The GitHub Actions workflow publishes `updates/appcast.xml` to
+6. The GitHub Actions workflow publishes `appcast.xml` to
    `https://roblibob.github.io/appcast.xml`.
+7. The Homebrew cask is updated automatically after the GitHub Release is published.
 
 ## Makefile shortcut
 ```
@@ -49,6 +50,16 @@ Workflow: `.github/workflows/publish-appcast.yml`
 - Trigger: push to `main` when `appcast.xml` changes
 - Action: copy appcast to `roblibob/roblibob.github.io/appcast.xml`
 - Secret required: `APPCAST_PUBLISH_TOKEN` (PAT with write access to the pages repo)
+
+## CI: update Homebrew cask
+Workflow: `.github/workflows/update-brew-cask.yml`
+- Trigger: release published
+- Action: download `Minute-<version>.dmg`, compute SHA256, update the tap cask
+- Secret required: `BREW_TAP_TOKEN` (PAT with write access to `roblibob/homebrew-minute`)
+
+## Homebrew tap (local)
+Tap repo lives at:
+`~/Projects/FLX/Minute/homebrew-minute`
 
 ## Troubleshooting
 - Notarytool stuck: resubmit with `xcrun notarytool submit ... --wait`

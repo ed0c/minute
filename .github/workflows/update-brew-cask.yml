@@ -1,0 +1,97 @@
+name: Update Homebrew Cask
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          if [ -z "$VERSION" ]; then
+            echo "error: empty version from tag $TAG" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=Minute-$VERSION.dmg" >> "$GITHUB_OUTPUT"
+
+      - name: Download release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/minute-release
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ steps.version.outputs.asset }}" \
+            --dir /tmp/minute-release
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 "/tmp/minute-release/${{ steps.version.outputs.asset }}" | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tap token is configured
+        run: |
+          if [ -z "${{ secrets.BREW_TAP_TOKEN }}" ]; then
+            echo "error: BREW_TAP_TOKEN secret is not set" >&2
+            exit 1
+          fi
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: roblibob/homebrew-minute
+          token: ${{ secrets.BREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update cask
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          cat <<EOF > "tap/Casks/minute.rb"
+cask "minute" do
+  version "${VERSION}"
+  sha256 "${SHA}"
+
+  url "https://github.com/roblibob/Minute/releases/download/v#{version}/Minute-#{version}.dmg"
+  name "Minute"
+  desc "Local-first meeting recorder with transcription and summaries"
+  homepage "https://github.com/roblibob/Minute"
+
+  auto_updates true
+  depends_on macos: ">= :sonoma"
+
+  app "Minute.app"
+
+  zap trash: [
+    "~/Library/Application Support/Minute",
+    "~/Library/Preferences/com.roblibob.Minute.plist",
+  ]
+end
+EOF
+
+      - name: Commit and push
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No cask changes to commit."
+            exit 0
+          fi
+          git add Casks/minute.rb
+          git commit -m "Update minute cask to v${{ steps.version.outputs.version }}"
+          git push
