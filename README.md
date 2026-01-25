@@ -6,7 +6,7 @@
   <br>
 </h1>
 
-<h4 align="center">A local-first macOS meeting capture app that writes deterministic notes into your Obsidian vault.</h4>
+<h4 align="center">Capture meetings, voice memos, videos, and system audio directly into your Obsidian Vault. 100% Local. Zero Monthly Fees.</h4>
 
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2014%2B-0B1B2B">
@@ -39,15 +39,49 @@ brew install --cask minute
 3. Launch Minute from Applications.
 
 ## Key Features
-- Records audio locally (mic + system audio).
-- Transcribes locally with Whisper.
-- Summarizes locally with Llama (JSON-only output).
-- Renders deterministic Markdown using a fixed template.
-- Writes notes, audio, and transcript directly into your Obsidian vault.
-- Enriches notes with optional screen context captures during recording.
-- Live waveform and live transcript during recording.
 
-Output example:
+### Total Audio Capture
+* **System Audio & Mic Mixed:** Record your Zoom calls, Google Meets, or Discord chats directly. No virtual audio cables or "bot" participants required.
+* **Process video:** Turn already recorded video files into summaries.
+* **Live Waveform:** Visual feedback confirms you are capturing audio in real-time.
+
+### Vision-Enhanced Context
+* **See What Was Said:** Minute can optionally capture and understand screen context snapshots during recording.
+* **Disambiguation:** If a speaker refers to "this chart" or "that code block," the AI uses the visual context to write a more accurate summary.
+
+### Deterministic Obsidian Output
+* **No "Wall of Text":** Unlike generic chat bots, Minute uses constrained JSON generation to force the LLM into a strict schema.
+* **Vault-Ready:** Writes directly to your local folder.
+    * ✅ Valid YAML Frontmatter (Date, Tags, Duration).
+    * ✅ Clean Markdown headers and properties.
+    * ✅ Links to the full transcript and audio for reference.
+
+### 100% Private & Offline
+* **Apple Silicon Native:** Runs `Whisper` (for transcription) and `Llama/Gemma 3` (for screen context and summarization) entirely on your Mac's Neural Engine.
+* **Zero Data Leak:** Unplug your ethernet cable—it still works. Your meetings never touch a server.
+
+
+## Why I Built Minute
+I live in Obsidian, but I was frustrated by the state of AI tools for macOS.
+
+Most existing solutions forced me into one of two compromises:
+1.  **Privacy Trade-offs:** Sending my private journals and meeting notes to cloud APIs (OpenAI/Anthropic) felt wrong and is often not acceptable for my clients.
+2.  **The Workflow Gap:** Most tools just dump text. Minute is engineered to produce *structured data* that actually fits into my workflow.
+
+I built **Minute** to be the tool I wanted to use: a **native, lightweight Swift application** that respects the "Local-First" philosophy of Obsidian. It runs entirely on your device, uses your Mac's dedicated Neural Engine, and never asks for a credit card. It has one purpose and does it well.
+
+## Comparison
+
+| Feature | ⚡️ Minute | ☁️ Other tools
+| :--- | :--- | :--- | 
+| **Privacy** | ✅ **Local (Device Only)** | ❌ Cloud Processed | 
+| **Cost** | ✅ **Free / OSS** | ❌ $10–$30/mo | 
+| **Audio Source** | ✅ **Mic + System Audio** | ❌ Requires "Bot" to join(usually) |
+| **Workflow** | ✅ **Direct Vault Write** | ❌ Copy/Paste required | 
+| **Latency** | ✅ **Real-time (On-chip)** | ❌ Network Lag | 
+| **Context** | ✅ **👀 Vision/Screen Aware** | ❌ Audio Only |
+
+## Output example
 ```
 ---
 type: meeting
