@@ -5,6 +5,7 @@
 //  Created by Robert Holst on 12/19/25.
 //
 
+import AppKit
 import MinuteCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,6 +13,8 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject private var appState: AppNavigationModel
     @StateObject private var onboardingModel = OnboardingViewModel()
+    @State private var allowFocusRings = false
+    @State private var keyDownMonitor: Any?
 
     var body: some View {
         Group {
@@ -20,14 +23,34 @@ struct ContentView: View {
         .frame(minWidth: 860, minHeight: 620)
         .background(MinuteTheme.backgroundGradient)
         .tint(Color.minuteGlow)
-        .onAppear { onboardingModel.refreshAll() }
+        .focusEffectDisabled(!allowFocusRings)
+        .onAppear {
+            onboardingModel.refreshAll()
+            if keyDownMonitor == nil {
+                keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    if event.keyCode == 48 {
+                        allowFocusRings = true
+                    }
+                    return event
+                }
+            }
+        }
+        .onDisappear {
+            if let monitor = keyDownMonitor {
+                NSEvent.removeMonitor(monitor)
+                keyDownMonitor = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .minuteMicActivityShowPipeline)) { _ in
+            appState.showPipeline()
+        }
     }
 
     @ViewBuilder
     private var contentBody: some View {
         if onboardingModel.isComplete {
             ZStack {
-                PipelineContentView()
+                PipelineContentView(allowFocusRings: allowFocusRings)
 
                 if appState.mainContent == .settings {
                     SettingsOverlayView()
@@ -40,10 +63,15 @@ struct ContentView: View {
 }
 
 private struct PipelineContentView: View {
+    let allowFocusRings: Bool
     @StateObject private var model = MeetingPipelineViewModel.live()
     @StateObject private var notesModel = MeetingNotesBrowserViewModel()
     @AppStorage(AppDefaultsKey.screenContextEnabled)
     private var screenContextEnabled: Bool = AppConfiguration.Defaults.defaultScreenContextEnabled
+    @AppStorage(AppDefaultsKey.micActivityNotificationsEnabled)
+    private var micActivityNotificationsEnabled: Bool = AppConfiguration.Defaults.defaultMicActivityNotificationsEnabled
+    @State private var micActivityCoordinator = MicActivityNotificationCoordinator()
+    @FocusState private var recordButtonFocused: Bool
     @State private var isImportingFile = false
     @State private var isDropTargeted = false
     @State private var isRecordingWindowPickerPresented = false
@@ -84,11 +112,20 @@ private struct PipelineContentView: View {
             .onAppear {
                 model.refreshVaultStatus()
                 notesModel.refresh()
+                micActivityCoordinator.setEnabled(micActivityNotificationsEnabled)
+                micActivityCoordinator.updatePipelineState(model.state)
+            }
+            .onDisappear {
+                micActivityCoordinator.stop()
             }
             .onReceive(model.$state) { newState in
                 if case .done = newState {
                     notesModel.refresh()
                 }
+                micActivityCoordinator.updatePipelineState(newState)
+            }
+            .onChange(of: micActivityNotificationsEnabled) { _, newValue in
+                micActivityCoordinator.setEnabled(newValue)
             }
             .contentShape(Rectangle())
             .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
@@ -111,6 +148,9 @@ private struct PipelineContentView: View {
             }
             .onChange(of: screenContextEnabled) { _, newValue in
                 handleScreenContextSettingChange(newValue)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .minuteMicActivityStartRecording)) { _ in
+                handleNotificationStartRecording()
             }
         }
     }
@@ -168,6 +208,8 @@ private struct PipelineContentView: View {
             showsScreenShareControl: screenContextEnabled,
             controlsEnabled: captureTogglesEnabled,
             uploadEnabled: model.state.canImportMedia,
+            recordFocus: $recordButtonFocused,
+            allowFocusRings: allowFocusRings,
             onRecordTap: handleRecordButtonTap,
             onAudioModeChange: setAudioCaptureMode,
             onScreenShareToggle: { handleScreenToggleChange(!isScreenToggleOn) },
@@ -340,6 +382,15 @@ private struct PipelineContentView: View {
         case .done, .failed:
             model.send(.reset)
             requestStartRecording()
+        default:
+            break
+        }
+    }
+
+    private func handleNotificationStartRecording() {
+        switch model.state {
+        case .idle, .done, .failed:
+            handleRecordButtonTap()
         default:
             break
         }
@@ -841,6 +892,8 @@ private struct FloatingControlBar: View {
     let showsScreenShareControl: Bool
     let controlsEnabled: Bool
     let uploadEnabled: Bool
+    let recordFocus: FocusState<Bool>.Binding
+    let allowFocusRings: Bool
     let onRecordTap: () -> Void
     let onAudioModeChange: (AudioCaptureMode) -> Void
     let onScreenShareToggle: () -> Void
@@ -881,6 +934,8 @@ private struct FloatingControlBar: View {
             RecordControlButton(
                 state: recordState,
                 isEnabled: recordEnabled,
+                focusBinding: recordFocus,
+                allowFocusRings: allowFocusRings,
                 action: onRecordTap
             )
         }
@@ -1086,6 +1141,8 @@ private struct ControlBarIconButton: View {
 private struct RecordControlButton: View {
     let state: RecordButtonState
     let isEnabled: Bool
+    let focusBinding: FocusState<Bool>.Binding
+    let allowFocusRings: Bool
     let action: () -> Void
 
     @State private var isPulsing = false
@@ -1166,10 +1223,22 @@ private struct RecordControlButton: View {
                         .scaleEffect(isPulsing ? 1.4 : 0.9)
                         .opacity(isPulsing ? 0 : 0.8)
                 }
+
+                if allowFocusRings && focusBinding.wrappedValue && isEnabled {
+                    Circle()
+                        .stroke(Color.red.opacity(0.95), lineWidth: 2)
+                        .frame(width: 64, height: 64)
+                    Circle()
+                        .stroke(Color.red.opacity(0.35), lineWidth: 6)
+                        .frame(width: 70, height: 70)
+                        .blur(radius: 0.5)
+                }
             }
             .frame(width: 64, height: 64)
         }
         .buttonStyle(.plain)
+        .focused(focusBinding)
+        .focusEffectDisabled()
         .disabled(!isEnabled || state == .processing)
         .opacity(isEnabled ? 1 : 0.6)
         .help(helpText)
