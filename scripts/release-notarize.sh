@@ -8,7 +8,7 @@ CREATE_DMG="${CREATE_DMG:-1}"
 CREATE_ZIP="${CREATE_ZIP:-1}"
 GENERATE_APPCAST="${GENERATE_APPCAST:-1}"
 APPCAST_DOWNLOAD_URL_PREFIX="${APPCAST_DOWNLOAD_URL_PREFIX:-}"
-APPCAST_DEST="${APPCAST_DEST:-appcast.xml}"
+APPCAST_DEST="${APPCAST_DEST:-$OUTPUT_DIR/appcast.xml}"
 
 if [ -z "$ARCHIVE_PATH" ]; then
   cat <<EOF
@@ -21,7 +21,7 @@ Environment overrides:
   CREATE_ZIP=1
   GENERATE_APPCAST=1
   APPCAST_DOWNLOAD_URL_PREFIX=
-  APPCAST_DEST=appcast.xml
+  APPCAST_DEST=$OUTPUT_DIR/appcast.xml
   SPARKLE_APPCAST_ARGS=
 EOF
   exit 1
@@ -60,6 +60,15 @@ sign_app_bundle() {
     /usr/bin/codesign --force --timestamp --options runtime --entitlements "$entitlements_file" --sign "$SIGN_IDENTITY" "$APP_PATH"
   else
     /usr/bin/codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH"
+  fi
+}
+
+sign_app_helpers() {
+  local xpc_dir="$APP_PATH/Contents/XPCServices"
+  if [ -d "$xpc_dir" ]; then
+    find "$xpc_dir" -type d -name "*.xpc" -print0 | while IFS= read -r -d '' xpc; do
+      sign_path "$xpc"
+    done
   fi
 }
 
@@ -104,6 +113,7 @@ cleanup() {
 trap cleanup EXIT
 
 sign_sparkle_helpers
+sign_app_helpers
 sign_app_bundle
 
 TEMP_ZIP="$TEMP_DIR/Minute-notary.zip"
