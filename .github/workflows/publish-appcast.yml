@@ -46,19 +46,7 @@ jobs:
         id: appcast
         run: |
           set -euo pipefail
-          asset_id=$(python - <<'PY'
-import json, os, sys
-path=os.environ["RELEASE_JSON"]
-data=json.load(open(path))
-release=data.get("release", data)
-assets=release.get("assets", [])
-for asset in assets:
-    if asset.get("name") == "appcast.xml":
-        print(asset.get("id", ""))
-        sys.exit(0)
-sys.exit(1)
-PY
-)
+          asset_id=$(python -c 'import json, os, sys; path=os.environ["RELEASE_JSON"]; data=json.load(open(path)); release=data.get("release", data); assets=release.get("assets", []); [print(a.get("id","")) or sys.exit(0) for a in assets if a.get("name") == "appcast.xml"]; sys.exit(1)')
           if [ -z "$asset_id" ]; then
             echo "error: appcast.xml not found in release assets" >&2
             exit 1
