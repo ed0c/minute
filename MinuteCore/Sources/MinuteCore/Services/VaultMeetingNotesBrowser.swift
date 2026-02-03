@@ -6,18 +6,21 @@ public struct MeetingNoteItem: Sendable, Identifiable, Equatable {
     public var date: Date?
     public var relativePath: String
     public var fileURL: URL
+    public var hasTranscript: Bool
 
-    public init(title: String, date: Date?, relativePath: String, fileURL: URL) {
+    public init(title: String, date: Date?, relativePath: String, fileURL: URL, hasTranscript: Bool = false) {
         self.title = title
         self.date = date
         self.relativePath = relativePath
         self.fileURL = fileURL
+        self.hasTranscript = hasTranscript
     }
 }
 
 public protocol MeetingNotesBrowsing: Sendable {
     func listNotes() async throws -> [MeetingNoteItem]
     func loadNoteContent(for item: MeetingNoteItem) async throws -> String
+    func loadTranscriptContent(for item: MeetingNoteItem) async throws -> String
     func deleteNoteFiles(for item: MeetingNoteItem) async throws
 }
 
@@ -59,6 +62,7 @@ public struct VaultMeetingNotesBrowser: MeetingNotesBrowsing, @unchecked Sendabl
             guard FileManager.default.fileExists(atPath: meetingsRootURL.path) else {
                 return []
             }
+            let transcriptRootURL = Self.directoryURL(from: vaultRootURL, relativePath: transcriptsRelativePath)
 
             let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .contentModificationDateKey]
             let options: FileManager.DirectoryEnumerationOptions = [.skipsHiddenFiles, .skipsPackageDescendants]
@@ -90,12 +94,15 @@ public struct VaultMeetingNotesBrowser: MeetingNotesBrowsing, @unchecked Sendabl
 
                 let relativePath = Self.relativePath(from: vaultRootURL, to: url)
                 let sortDate = parseResult.date ?? values.contentModificationDate ?? Date.distantPast
+                let transcriptURL = transcriptRootURL.appendingPathComponent("\(filename).md")
+                let hasTranscript = FileManager.default.fileExists(atPath: transcriptURL.path)
 
                 let item = MeetingNoteItem(
                     title: parseResult.title,
                     date: parseResult.date,
                     relativePath: relativePath,
-                    fileURL: url
+                    fileURL: url,
+                    hasTranscript: hasTranscript
                 )
                 candidates.append(NoteCandidate(item: item, sortDate: sortDate))
             }
@@ -111,6 +118,21 @@ public struct VaultMeetingNotesBrowser: MeetingNotesBrowsing, @unchecked Sendabl
 
         return try vaultAccess.withVaultAccess { _ in
             let data = try Data(contentsOf: item.fileURL)
+            if let content = String(data: data, encoding: .utf8) {
+                return content
+            }
+            return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    public func loadTranscriptContent(for item: MeetingNoteItem) async throws -> String {
+        try Task.checkCancellation()
+
+        return try vaultAccess.withVaultAccess { vaultRootURL in
+            let baseName = item.fileURL.deletingPathExtension().lastPathComponent
+            let transcriptRootURL = Self.directoryURL(from: vaultRootURL, relativePath: transcriptsRelativePath)
+            let transcriptURL = transcriptRootURL.appendingPathComponent("\(baseName).md")
+            let data = try Data(contentsOf: transcriptURL)
             if let content = String(data: data, encoding: .utf8) {
                 return content
             }
