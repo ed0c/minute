@@ -1,8 +1,8 @@
-import Testing
 import Foundation
-@testable import MinuteCore
+import Testing
+@testable import Minute
 
-struct MinuteCoreTests {
+struct MinuteTests {
     @Test
     func smoke() {
         #expect(true)
