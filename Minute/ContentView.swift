@@ -791,6 +791,7 @@ private struct RecordingHeaderView: View {
                     .fill(Color.minuteSurface)
             )
         }
+        .padding(.top, 8)
     }
 }
 
