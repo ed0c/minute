@@ -35,12 +35,6 @@ archive:
 	  echo "Usage: make archive ARCHIVE=/path/to/Minute.xcarchive"; \
 	  exit 1; \
 	fi
-
-test:
-	xcodebuild -workspace "$(WORKSPACE)" -scheme MinuteCore -configuration Debug test -destination "platform=macOS"
-
-test-all:
-	xcodebuild -workspace "$(WORKSPACE)" -scheme Minute -configuration Debug test
 	@if [ -d "$(WORKSPACE)" ]; then \
 	  xcodebuild -workspace "$(WORKSPACE)" -scheme "$(SCHEME)" -configuration "$(CONFIGURATION)" -destination "generic/platform=macOS" -archivePath "$(ARCHIVE)" archive; \
 	elif [ -d "$(PROJECT)" ]; then \
@@ -49,3 +43,10 @@ test-all:
 	  echo "error: no workspace or project found" >&2; \
 	  exit 1; \
 	fi
+
+test:
+	xcodebuild -workspace "$(WORKSPACE)" -scheme MinuteCore -configuration Debug test -destination "platform=macOS"
+
+test-all:
+	xcodebuild -workspace "$(WORKSPACE)" -scheme Minute -configuration Debug test
+
