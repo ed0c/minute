@@ -89,6 +89,11 @@ struct MeetingNotesSidebarView: View {
                                 durationLabel: durationLabel(for: preview),
                                 isSelected: model.selectedItem?.id == item.id,
                                 onSelect: { model.select(item) },
+                                onOpenSummaryInApp: { model.openSummaryInApp(for: item) },
+                                onOpenTranscriptInApp: { model.openTranscriptInApp(for: item) },
+                                onOpenSummaryInObsidian: { model.openSummaryInObsidian(for: item) },
+                                onOpenTranscriptInObsidian: { model.openTranscriptInObsidian(for: item) },
+                                onRevealInFinder: { model.revealInFinder(for: item) },
                                 onDelete: { model.delete(item) }
                             )
                             .listRowInsets(EdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 8))
@@ -237,6 +242,11 @@ private struct MeetingNoteRow: View {
     let durationLabel: String?
     let isSelected: Bool
     let onSelect: () -> Void
+    let onOpenSummaryInApp: () -> Void
+    let onOpenTranscriptInApp: () -> Void
+    let onOpenSummaryInObsidian: () -> Void
+    let onOpenTranscriptInObsidian: () -> Void
+    let onRevealInFinder: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -268,13 +278,45 @@ private struct MeetingNoteRow: View {
         .buttonStyle(.plain)
         .listRowBackground(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
         .contextMenu {
-            Button("Rename…") {}
-                .disabled(true)
+            Button {
+                onOpenSummaryInApp()
+            } label: {
+                Label("View Summary", systemImage: "doc.text")
+            }
+
+            Button {
+                onOpenTranscriptInApp()
+            } label: {
+                Label("View Transcript", systemImage: "text.bubble")
+            }
+            .disabled(!item.hasTranscript)
+
+            Divider()
+
+            Button {
+                onOpenSummaryInObsidian()
+            } label: {
+                Label("Open Summary in Obsidian", systemImage: "arrow.up.right.square")
+            }
+
+            Button {
+                onOpenTranscriptInObsidian()
+            } label: {
+                Label("Open Transcript in Obsidian", systemImage: "arrow.up.right.square")
+            }
+            .disabled(!item.hasTranscript)
+
+            Button {
+                onRevealInFinder()
+            } label: {
+                Label("Reveal in Finder", systemImage: "finder")
+            }
+
             Divider()
             Button(role: .destructive) {
                 onDelete()
             } label: {
-                Text("Delete")
+                Label("Delete", systemImage: "trash")
             }
         }
     }
