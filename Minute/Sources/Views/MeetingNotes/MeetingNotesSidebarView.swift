@@ -26,9 +26,19 @@ struct MeetingNotesSidebarView: View {
         return formatter
     }()
 
+    private var topInset: CGFloat {
+        if #available(macOS 26.0, *) {
+            12
+        } else {
+            40
+        }
+    }
+
     var body: some View {
         content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(MinuteTheme.sidebarBackground)
+            .safeAreaPadding(.top, topInset)
     }
 
     @ViewBuilder
