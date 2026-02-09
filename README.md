@@ -115,57 +115,20 @@ During a court hearing in the 27th Judicial District, Rod Ponton experienced a p
 
 ```
 
-## Project Structure
-```mermaid
-graph TD
-    Root[Repository] --> Minute[Minute App Target]
-    Root --> MinuteCore[MinuteCore Package]
-    Root --> Vendor[External Binaries]
-    
-    Minute --> App[Sources/App]
-    Minute --> Views[Sources/Views]
-    Minute --> VM[Sources/ViewModels]
-    
-    MinuteCore --> Services[Services]
-    MinuteCore --> Domain[Domain Logic]
-    MinuteCore --> Libs[Inference Libs]
-    
-    Vendor --> ffmpeg[ffmpeg]
-```
+## Project contributors
+Special ❤️ to the contributors:
+
+<a href="https://github.com/roblibob/minute/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=roblibob/minute" />
+</a>
 
 ## Requirements
 - macOS 14+
 - Apple Silicon (M1 or newer)
 
-## Developer Notes (Bundled Runtimes)
-
-The app bundles a few runtime executables/libraries at build time via Xcode “Run Script” phases.
-
-- `Vendor/ffmpeg/ffmpeg` is copied into `Minute.app/Contents/Resources/ffmpeg`.
-- `Vendor/llama-mtmd/llama-mtmd-cli` (and adjacent `lib*.0.dylib`) are copied into `Minute.app/Contents/Resources/`.
-
-If you need to point at a custom `llama-mtmd-cli` build, set `LLAMA_MTMD_SOURCE` in your Xcode scheme environment variables.
-
 ## Privacy
 - Audio and inference stay local.
 - No outbound network calls except model downloads.
-
-## Testing
-
-Run app tests:
-```
-xcodebuild -workspace Minute.xcworkspace -scheme Minute -configuration Debug test -destination 'platform=macOS'
-```
-
-Run MinuteCore tests:
-```
-xcodebuild -workspace Minute.xcworkspace -scheme MinuteCore -configuration Debug test -destination 'platform=macOS'
-```
-
-Or use the Makefile shortcut:
-```
-make test
-```
 
 ## Contributing
 See `CONTRIBUTING.md`.
