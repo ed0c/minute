@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/minute.gif" alt="Minute demo" width="820">
+  <img src="docs/minute.gif" alt="Minute demo" width="640">
 </p>
 
 ## Install (Homebrew)
@@ -42,8 +42,8 @@ brew install --cask minute
 
 ### Total Audio Capture
 * **System Audio & Mic Mixed:** Record your Zoom calls, Google Meets, or Discord chats directly. No virtual audio cables or "bot" participants required.
+* **Participant Memory:** Minute remembers people between meetings, so speaker names auto-resolve faster and your notes stay instantly familiar.
 * **Process video:** Turn already recorded video files into summaries.
-* **Live Waveform:** Visual feedback confirms you are capturing audio in real-time.
 
 ### Vision-Enhanced Context
 * **See What Was Said:** Minute can optionally capture and understand screen context snapshots during recording.
@@ -55,6 +55,7 @@ brew install --cask minute
     * ✅ Valid YAML Frontmatter (Date, Tags, Duration).
     * ✅ Clean Markdown headers and properties.
     * ✅ Links to the full transcript and audio for reference.
+    * ✅ Capture up to 25 different languages.
 
 ### 100% Private & Offline
 * **Apple Silicon Native:** Runs `Fluidaudio/Parakeet` (for transcription) and `Llama/Gemma 3` (for screen context and summarization) entirely on your Mac's Neural Engine.
