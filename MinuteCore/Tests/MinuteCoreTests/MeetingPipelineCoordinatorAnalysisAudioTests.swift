@@ -148,10 +148,18 @@ private struct TestSummarizationService: SummarizationServicing {
     var summarizationJSON: String
     var repairJSON: String
 
-    func summarize(transcript: String, meetingDate: Date, meetingType: MeetingType) async throws -> String {
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) async throws -> String {
         _ = transcript
         _ = meetingDate
         _ = meetingType
+        _ = languageProcessing
+        _ = outputLanguage
         return summarizationJSON
     }
 

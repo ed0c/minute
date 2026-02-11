@@ -57,14 +57,45 @@ public struct LlamaLibrarySummarizationService: SummarizationServicing {
         )
     }
 
-    public func summarize(transcript: String, meetingDate: Date, meetingType: MeetingType) async throws -> String {
+    public func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) async throws -> String {
         let strategy = PromptFactory.strategy(for: meetingType)
         // Prepend date context to transcript for the model
         let datedTranscript = "Meeting Date: \(MinuteISODate.format(meetingDate))\n\n\(transcript)"
+
+        let systemPrompt = PromptFactory.systemPrompt(
+            strategy: strategy,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+        logger.info(
+            "Summarization system prompt [meetingType=\(meetingType.rawValue, privacy: .public), languageProcessing=\(languageProcessing.rawValue, privacy: .public), outputLanguage=\(outputLanguage.rawValue, privacy: .public)]: \(systemPrompt, privacy: .public)"
+        )
+        let baseUserPrompt = strategy.userPrompt(for: datedTranscript)
+        let languageProcessingUserInstruction = languageProcessing
+            .summarizationUserInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputLanguageUserInstruction = outputLanguage
+            .summarizationUserInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let languageUserInstruction = [languageProcessingUserInstruction, outputLanguageUserInstruction]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let userPrompt: String
+        if languageUserInstruction.isEmpty {
+            userPrompt = baseUserPrompt
+        } else {
+            userPrompt = languageUserInstruction + "\n\n" + baseUserPrompt
+        }
         
         return try await runLlama(
-            systemPrompt: strategy.systemPrompt(),
-            userPrompt: strategy.userPrompt(for: datedTranscript)
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt
         )
     }
 
@@ -377,7 +408,8 @@ private enum PromptBuilder {
     private static let logger = Logger(subsystem: "roblibob.Minute", category: "prompt-builder")
     static func summarizationPrompt(
         transcript: String,
-        meetingDate: Date
+        meetingDate: Date,
+        languageProcessing: LanguageProcessingProfile = .autoToEnglish
     ) -> String {
         let systemPrompt: String = """
         You are an expert automated meeting secretary. Your goal is to analyze a chronological meeting timeline and generate a structured, factual summary in strict JSON format.
@@ -390,7 +422,7 @@ private enum PromptBuilder {
         1. **Truthfulness is Paramount:** Base all outputs *exclusively* on the provided transcript. Do not infer feelings, motives, or details not explicitly spoken. If a point is ambiguous, omit it rather than guessing.
         2. **ASR Error Correction:** The transcript is machine-generated and may contain phonetic errors (e.g., "sink" instead of "sync"). Use context to interpret the correct meaning, but do not alter the factual substance.
         3. **Filter Noise:** Ignore small talk, pleasantries, incomplete sentences, and non-substantive filler (um, ah). Focus on the "business" of the meeting.
-        4. **Language Handling:** Detect the dominant language of the business discussion. But output summary in English. Retain specific technical terms or proper nouns in their original language.
+        4. **Language Handling:** Detect the dominant language of the business discussion. Retain specific technical terms or proper nouns in their original language.
 
         ### OUTPUT FORMAT
         You must output a single, valid JSON object. Do not include markdown formatting (```json), explanations, or raw text outside the braces.
@@ -420,10 +452,16 @@ private enum PromptBuilder {
         \(transcript)
         """
 
+        let instruction = languageProcessing
+            .summarizationSystemInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPrompt = instruction.isEmpty ? systemPrompt : (systemPrompt + "\n\n" + instruction + "\n")
+
         #if DEBUG
-        logger.info("System prompt: \(systemPrompt)")
+        logger.info("System prompt: \(resolvedPrompt)")
         #endif
-        return systemPrompt
+        _ = meetingDate
+        return resolvedPrompt
     }
 
     static func repairPrompt(invalidOutput: String) -> String {

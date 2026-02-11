@@ -19,6 +19,12 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let fluidAudioAsrModelIDKey = "fluidAudioAsrModelID"
         public static let micActivityNotificationsEnabledKey = "micActivityNotificationsEnabled"
         public static let knownSpeakerSuggestionsEnabledKey = "knownSpeakerSuggestionsEnabled"
+        public static let outputLanguageKey = "outputLanguage"
+
+        public static let stageMeetingTypeKey = "stageMeetingType"
+        public static let stageLanguageProcessingKey = "stageLanguageProcessing"
+        public static let stageMicrophoneEnabledKey = "stageMicrophoneEnabled"
+        public static let stageSystemAudioEnabledKey = "stageSystemAudioEnabled"
 
         public static let defaultMeetingsRelativePath = "Meetings"
         public static let defaultAudioRelativePath = "Meetings/_audio"
@@ -31,8 +37,14 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let defaultScreenContextCaptureIntervalSeconds: TimeInterval = 60
         public static let defaultMicActivityNotificationsEnabled = true
         public static let defaultKnownSpeakerSuggestionsEnabled = false
+        public static let defaultOutputLanguage = OutputLanguage.defaultSelection
         public static let defaultTranscriptionBackendID = TranscriptionBackend.whisper.rawValue
         public static let defaultFluidAudioAsrModelID = FluidAudioASRModelCatalog.defaultModelID
+
+        public static let defaultStageMeetingType = MeetingType.autodetect
+        public static let defaultStageLanguageProcessing = LanguageProcessingProfile.autoToEnglish
+        public static let defaultStageMicrophoneEnabled = true
+        public static let defaultStageSystemAudioEnabled = true
     }
 
     public var meetingsRelativePath: String
