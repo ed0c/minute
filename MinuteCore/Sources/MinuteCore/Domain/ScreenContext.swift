@@ -126,3 +126,19 @@ public struct ScreenContextEvent: Sendable, Equatable {
         self.inference = inference
     }
 }
+
+public enum ScreenContextLifecycleEventType: String, Sendable, Equatable {
+    case sharedWindowClosed
+}
+
+public struct ScreenContextLifecycleEvent: Sendable, Equatable {
+    public var type: ScreenContextLifecycleEventType
+    public var windowTitle: String
+    public var timestamp: Date
+
+    public init(type: ScreenContextLifecycleEventType, windowTitle: String, timestamp: Date = Date()) {
+        self.type = type
+        self.windowTitle = windowTitle
+        self.timestamp = timestamp
+    }
+}

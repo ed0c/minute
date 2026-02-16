@@ -149,6 +149,8 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
 ## Active Technologies
 - Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, MinuteCore, (001-swift-testing-refactor)
 - Files (Obsidian vault output, app support directories) (001-swift-testing-refactor)
+- Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore (010-silence-auto-stop)
+- Local files only (existing vault outputs and temporary recording session directory), plus session-scoped event history in memory for stop rationale (010-silence-auto-stop)
 
 ## Recent Changes
 - 001-swift-testing-refactor: Added Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, MinuteCore,

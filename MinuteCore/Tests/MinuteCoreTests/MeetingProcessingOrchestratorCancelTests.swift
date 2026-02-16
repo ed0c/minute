@@ -149,6 +149,78 @@ struct MeetingProcessingOrchestratorCancelTests {
             // expected
         }
     }
+
+    @Test
+    func cancelActiveProcessing_thenPendingCompletion_updatesLastOutcomeToCompleted() async throws {
+        let gate = ProcessingBusyGate()
+        let primaryMeetingID = UUID()
+        let pendingMeetingID = UUID()
+        let contextPrimary = try makePipelineContext()
+        let contextPending = try makePipelineContext()
+        let completedNoteURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-completed-\(UUID().uuidString).md")
+
+        let executor = MixedOutcomePipelineExecutor(
+            cancellableMeetingID: primaryMeetingID,
+            completedNoteURL: completedNoteURL
+        )
+        let orchestrator = MeetingProcessingOrchestrator(busyGate: gate, executePipeline: executor.execute)
+
+        _ = await orchestrator.enqueue(meetingID: primaryMeetingID, context: contextPrimary)
+        try await executor.waitUntilStarted(meetingID: primaryMeetingID)
+
+        _ = await orchestrator.enqueue(meetingID: pendingMeetingID, context: contextPending)
+        await orchestrator.cancelActiveProcessing(clearPending: false)
+
+        await gate.waitUntilIdle()
+
+        let started = await executor.startedSnapshot()
+        #expect(started == [primaryMeetingID, pendingMeetingID])
+
+        let snapshot = await orchestrator.snapshot()
+        switch snapshot.lastOutcome {
+        case .completed(let noteURL, _):
+            #expect(noteURL == completedNoteURL)
+        default:
+            Issue.record("Expected completed outcome after pending run finishes")
+        }
+    }
+
+    @Test
+    func retryLastFailedOrCanceled_afterCanceledRun_completesAndReplacesCanceledOutcome() async throws {
+        let gate = ProcessingBusyGate()
+        let meetingID = UUID()
+        let context = try makePipelineContext()
+        let completedNoteURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-retry-completed-\(UUID().uuidString).md")
+
+        let executor = FirstAttemptCancelsThenCompletesExecutor(
+            meetingID: meetingID,
+            completedNoteURL: completedNoteURL
+        )
+        let orchestrator = MeetingProcessingOrchestrator(busyGate: gate, executePipeline: executor.execute)
+
+        _ = await orchestrator.enqueue(meetingID: meetingID, context: context)
+        try await executor.waitUntilStartedAttempt(meetingID: meetingID, attempt: 1)
+        await orchestrator.cancelActiveProcessing(clearPending: false)
+        await gate.waitUntilIdle()
+
+        let canceledSnapshot = await orchestrator.snapshot()
+        #expect(canceledSnapshot.lastOutcome == .canceled)
+
+        let retryAccepted = await orchestrator.retryLastFailedOrCanceled()
+        #expect(retryAccepted)
+        try await executor.waitUntilStartedAttempt(meetingID: meetingID, attempt: 2)
+        await gate.waitUntilIdle()
+
+        let snapshot = await orchestrator.snapshot()
+        switch snapshot.lastOutcome {
+        case .completed(let noteURL, _):
+            #expect(noteURL == completedNoteURL)
+        default:
+            Issue.record("Expected completed outcome after retry")
+        }
+    }
 }
 
 private actor CancellationRecorder {
@@ -292,6 +364,101 @@ private actor CancellablePipelineExecutor {
         }
 
         throw CancellationError()
+    }
+}
+
+private actor MixedOutcomePipelineExecutor {
+    enum WaitError: Error {
+        case timeout
+    }
+
+    private let cancellableMeetingID: UUID
+    private let completedNoteURL: URL
+    private var started: [UUID] = []
+
+    init(cancellableMeetingID: UUID, completedNoteURL: URL) {
+        self.cancellableMeetingID = cancellableMeetingID
+        self.completedNoteURL = completedNoteURL
+    }
+
+    func execute(
+        meetingID: UUID,
+        context: PipelineContext,
+        progress: (@Sendable (PipelineProgress) -> Void)?
+    ) async throws -> PipelineResult {
+        _ = context
+        _ = progress
+
+        started.append(meetingID)
+
+        if meetingID == cancellableMeetingID {
+            while true {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+
+        return PipelineResult(noteURL: completedNoteURL, audioURL: nil)
+    }
+
+    func startedSnapshot() -> [UUID] {
+        started
+    }
+
+    func waitUntilStarted(meetingID: UUID) async throws {
+        let deadline = Date().addingTimeInterval(1.0)
+        while !started.contains(meetingID) {
+            if Date() > deadline {
+                throw WaitError.timeout
+            }
+            await Task.yield()
+        }
+    }
+}
+
+private actor FirstAttemptCancelsThenCompletesExecutor {
+    enum WaitError: Error {
+        case timeout
+    }
+
+    private let meetingID: UUID
+    private let completedNoteURL: URL
+    private var startAttempts: [UUID: Int] = [:]
+
+    init(meetingID: UUID, completedNoteURL: URL) {
+        self.meetingID = meetingID
+        self.completedNoteURL = completedNoteURL
+    }
+
+    func execute(
+        meetingID: UUID,
+        context: PipelineContext,
+        progress: (@Sendable (PipelineProgress) -> Void)?
+    ) async throws -> PipelineResult {
+        _ = context
+        _ = progress
+
+        let attempt = (startAttempts[meetingID] ?? 0) + 1
+        startAttempts[meetingID] = attempt
+
+        if meetingID == self.meetingID, attempt == 1 {
+            while true {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+
+        return PipelineResult(noteURL: completedNoteURL, audioURL: nil)
+    }
+
+    func waitUntilStartedAttempt(meetingID: UUID, attempt: Int) async throws {
+        let deadline = Date().addingTimeInterval(1.0)
+        while (startAttempts[meetingID] ?? 0) < attempt {
+            if Date() > deadline {
+                throw WaitError.timeout
+            }
+            await Task.yield()
+        }
     }
 }
 

@@ -9,6 +9,7 @@ publishes the Sparkle appcast to GitHub Pages.
 - Notarytool keychain profile (example name: `minute-notary`)
 - Sparkle public key already in `Config/MinuteInfo.plist`
 - Sparkle private key available locally for signing the appcast (recommended)
+- Pre-release QA checklist reviewed: `docs/tasks/10-packaging-sandbox-signing-and-qa.md`
 
 ## Local release flow (authoritative)
 1. Archive in Xcode (Release configuration).

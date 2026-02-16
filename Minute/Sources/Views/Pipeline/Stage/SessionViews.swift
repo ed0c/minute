@@ -96,6 +96,7 @@ struct RecordingSessionCardView: View {
                                 .accessibilityValue(Text(dropErrorMessage))
                                 .transition(.opacity)
                         }
+
                     }
                 }
 

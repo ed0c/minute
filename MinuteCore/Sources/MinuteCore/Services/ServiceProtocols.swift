@@ -153,6 +153,30 @@ public protocol ScreenContextInferencing: Sendable {
     func inferScreenContext(from imageData: Data, windowTitle: String) async throws -> ScreenContextInference
 }
 
+public enum SilenceAutoStopEvent: Sendable, Equatable {
+    case warningStarted(RecordingAlert)
+    case warningCanceledBySpeech
+    case warningCanceledByUser
+    case autoStopTriggered
+    case statusChanged(SilenceStatusSnapshot)
+}
+
+public protocol SilenceAutoStopControlling: Sendable {
+    func start(sessionID: UUID, startedAt: Date) async
+    func stop() async
+    func ingest(level: Float, at: Date) async
+    func keepRecording() async
+    func status() async -> SilenceStatusSnapshot
+}
+
+@MainActor
+public protocol RecordingAlertNotifying: AnyObject {
+    func notifySilenceStopWarning(alert: RecordingAlert) async -> Bool
+    func notifySharedWindowClosed(alert: RecordingAlert) async -> Bool
+    func clearSilenceStopWarning() async
+    func clearSharedWindowClosedWarning() async
+}
+
 // MARK: - Models
 
 public struct ModelDownloadProgress: Sendable, Equatable {

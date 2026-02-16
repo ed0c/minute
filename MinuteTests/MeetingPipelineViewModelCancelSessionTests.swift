@@ -281,3 +281,282 @@ private func eventually(
 }
 
 private struct TestTimeoutError: Error {}
+
+struct MeetingPipelineViewModelSilenceBehaviorTests {
+    @Test
+    func autoStop_withoutUserAction_stopsRecordingAfterWarningCountdown() async throws {
+        let audioService = ContinuousSilenceAudioService()
+        let model = try await makeSilenceBehaviorModel(audioService: audioService)
+
+        await MainActor.run {
+            model.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 2_000_000_000) {
+            await audioService.stopRecordingCalls > 0
+        }
+
+        let sawAutoStopEvent = await MainActor.run {
+            model.recordingSessionEvents.contains { $0.eventType == .autoStopExecuted }
+        }
+        #expect(sawAutoStopEvent)
+
+        await MainActor.run {
+            model.send(.cancelRecording)
+        }
+    }
+
+    @Test
+    func keepRecordingAction_cancelsPendingAutoStop() async throws {
+        let audioService = ContinuousSilenceAudioService()
+        let model = try await makeSilenceBehaviorModel(audioService: audioService)
+
+        await MainActor.run {
+            model.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 2_000_000_000) {
+            await MainActor.run { model.activeSilenceAlert != nil }
+        }
+
+        await MainActor.run {
+            model.keepRecordingFromWarning()
+        }
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+        #expect(await audioService.stopRecordingCalls == 0)
+
+        let sawKeepRecordingEvent = await MainActor.run {
+            model.recordingSessionEvents.contains { $0.eventType == .keepRecordingSelected }
+        }
+        #expect(sawKeepRecordingEvent)
+
+        await MainActor.run {
+            model.send(.cancelRecording)
+        }
+    }
+
+    @Test
+    func sharedWindowClosed_setsAlert_andCoexistsWithSilenceWarning() async throws {
+        let audioService = ContinuousSilenceAudioService()
+        let model = try await makeSilenceBehaviorModel(audioService: audioService)
+
+        await MainActor.run {
+            model.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 2_000_000_000) {
+            await MainActor.run { model.activeSilenceAlert != nil }
+        }
+
+        await MainActor.run {
+            model._testHandleScreenContextLifecycleEvent(
+                ScreenContextLifecycleEvent(type: .sharedWindowClosed, windowTitle: "Slides")
+            )
+        }
+
+        let bothVisible = await MainActor.run {
+            model.activeSilenceAlert != nil && model.activeScreenContextAlert != nil
+        }
+        #expect(bothVisible)
+
+        let sawScreenContextEvent = await MainActor.run {
+            model.recordingSessionEvents.contains { $0.eventType == .screenWindowClosedNotified }
+        }
+        #expect(sawScreenContextEvent)
+
+        await MainActor.run {
+            model.send(.cancelRecording)
+        }
+    }
+
+    @Test
+    func sharedWindowClosed_withoutAction_stopsRecordingAfterCountdown() async throws {
+        let audioService = ContinuousSilenceAudioService()
+        let policy = SilenceDetectionPolicy(
+            silenceDurationSeconds: 10,
+            warningCountdownSeconds: 0.3,
+            rmsSilenceThreshold: 0.8,
+            transientToleranceSeconds: 0
+        )
+        let model = try await makeSilenceBehaviorModel(audioService: audioService, silenceDetectionPolicy: policy)
+
+        await MainActor.run {
+            model.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                if case .recording = model.state { return true }
+                return false
+            }
+        }
+
+        await MainActor.run {
+            model._testHandleScreenContextLifecycleEvent(
+                ScreenContextLifecycleEvent(type: .sharedWindowClosed, windowTitle: "Slides")
+            )
+        }
+
+        try await eventually(timeoutNanoseconds: 1_500_000_000) {
+            await audioService.stopRecordingCalls > 0
+        }
+
+        let didAutoStopFromScreenAlert = await MainActor.run {
+            model.recordingSessionEvents.contains {
+                $0.eventType == .autoStopExecuted && $0.metadata["source"] == "screen_window_closed"
+            }
+        }
+        #expect(didAutoStopFromScreenAlert)
+    }
+
+    @Test
+    func sharedWindowClosed_keepRecording_cancelsPendingAutoStop() async throws {
+        let audioService = ContinuousSilenceAudioService()
+        let policy = SilenceDetectionPolicy(
+            silenceDurationSeconds: 10,
+            warningCountdownSeconds: 0.3,
+            rmsSilenceThreshold: 0.8,
+            transientToleranceSeconds: 0
+        )
+        let model = try await makeSilenceBehaviorModel(audioService: audioService, silenceDetectionPolicy: policy)
+
+        await MainActor.run {
+            model.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                if case .recording = model.state { return true }
+                return false
+            }
+        }
+
+        await MainActor.run {
+            model._testHandleScreenContextLifecycleEvent(
+                ScreenContextLifecycleEvent(type: .sharedWindowClosed, windowTitle: "Slides")
+            )
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run { model.activeScreenContextAlert != nil }
+        }
+
+        await MainActor.run {
+            model.keepRecordingFromWarning()
+        }
+
+        try await Task.sleep(nanoseconds: 600_000_000)
+        #expect(await audioService.stopRecordingCalls == 0)
+
+        let didLogKeepSelection = await MainActor.run {
+            model.recordingSessionEvents.contains {
+                $0.eventType == .keepRecordingSelected && $0.metadata["source"] == "screen_window_closed"
+            }
+        }
+        #expect(didLogKeepSelection)
+
+        await MainActor.run {
+            model.send(.cancelRecording)
+        }
+    }
+}
+
+private func makeSilenceBehaviorModel(
+    audioService: ContinuousSilenceAudioService,
+    silenceDetectionPolicy: SilenceDetectionPolicy? = nil
+) async throws -> MeetingPipelineViewModel {
+    let suiteName = "MeetingPipelineViewModelSilenceBehaviorTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defaults.removePersistentDomain(forName: suiteName)
+    let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+    stagePreferencesStore.clear()
+
+    let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+    let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+    let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
+
+    let coordinator = MeetingPipelineCoordinator(
+        transcriptionService: MockTranscriptionService(),
+        diarizationService: MockDiarizationService(),
+        summarizationServiceProvider: summarizationServiceProvider,
+        modelManager: MockModelManager(),
+        vaultAccess: coordinatorVaultAccess,
+        vaultWriter: DefaultVaultWriter()
+    )
+
+    let alertNotifier = await MainActor.run { MockRecordingAlertNotifier() }
+    let defaultPolicy = SilenceDetectionPolicy(
+        silenceDurationSeconds: 0.15,
+        warningCountdownSeconds: 0.8,
+        rmsSilenceThreshold: 0.8,
+        transientToleranceSeconds: 0
+    )
+    let effectivePolicy = silenceDetectionPolicy ?? defaultPolicy
+
+    return await MainActor.run {
+        MeetingPipelineViewModel(
+            audioService: audioService,
+            mediaImportService: MockMediaImportService(),
+            recoveryService: MockRecordingRecoveryService(),
+            pipelineCoordinator: coordinator,
+            screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
+            screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+            screenContextSettingsStore: ScreenContextSettingsStore(),
+            vaultAccess: viewModelVaultAccess,
+            recordingPermissions: .alwaysGranted(),
+            stagePreferencesStore: stagePreferencesStore,
+            silenceDetectionPolicy: effectivePolicy,
+            recordingAlertNotifier: alertNotifier
+        )
+    }
+}
+
+private actor ContinuousSilenceAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling {
+    private var levelHandler: (@Sendable (Float) -> Void)?
+    private var loopTask: Task<Void, Never>?
+    private(set) var stopRecordingCalls = 0
+
+    func startRecording() async throws {
+        loopTask?.cancel()
+        loopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.emitSilenceLevel()
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
+        }
+    }
+
+    func cancelRecording() async {
+        loopTask?.cancel()
+        loopTask = nil
+    }
+
+    func stopRecording() async throws -> AudioCaptureResult {
+        stopRecordingCalls += 1
+        loopTask?.cancel()
+        loopTask = nil
+        throw MinuteError.audioExportFailed
+    }
+
+    func convertToContractWav(inputURL: URL, outputURL: URL) async throws {
+        _ = inputURL
+        _ = outputURL
+    }
+
+    func setLevelHandler(_ handler: (@Sendable (Float) -> Void)?) async {
+        levelHandler = handler
+    }
+
+    func setMicrophoneEnabled(_ enabled: Bool) async {
+        _ = enabled
+    }
+
+    func setSystemAudioEnabled(_ enabled: Bool) async {
+        _ = enabled
+    }
+
+    private func emitSilenceLevel() {
+        levelHandler?(0)
+    }
+}

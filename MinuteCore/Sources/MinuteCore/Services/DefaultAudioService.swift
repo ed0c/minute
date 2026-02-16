@@ -57,7 +57,7 @@ public actor DefaultAudioService: AudioServicing, AudioLevelMetering, AudioCaptu
         try FileManager.default.createDirectory(at: sessionDirectoryURL, withIntermediateDirectories: true)
 
         let captureURL = sessionDirectoryURL.appendingPathComponent("capture.caf")
-        let systemCaptureURL = sessionDirectoryURL.appendingPathComponent("system.caf")
+        let candidateSystemCaptureURL = sessionDirectoryURL.appendingPathComponent("system.caf")
 
         let logger = logger
 
@@ -99,22 +99,30 @@ public actor DefaultAudioService: AudioServicing, AudioLevelMetering, AudioCaptu
         let tapWriter = components.tapWriter
         let captureFormat = components.format
 
-        let systemCapture: SystemAudioCapture
-        do {
-            systemCapture = try await SystemAudioCapture.start(
-                outputURL: systemCaptureURL,
-                logger: logger,
-                levelHandler: { level in
-                    levelMixer.updateSystem(level)
-                },
-                isEnabled: systemAudioEnabled
-            )
-        } catch {
-            await MainActor.run {
-                engine.inputNode.removeTap(onBus: 0)
-                engine.stop()
+        let systemCapture: SystemAudioCapture?
+        let systemCaptureURL: URL?
+        if systemAudioEnabled {
+            do {
+                systemCapture = try await SystemAudioCapture.start(
+                    outputURL: candidateSystemCaptureURL,
+                    logger: logger,
+                    levelHandler: { level in
+                        levelMixer.updateSystem(level)
+                    },
+                    isEnabled: true
+                )
+                systemCaptureURL = candidateSystemCaptureURL
+            } catch {
+                await MainActor.run {
+                    engine.inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                }
+                throw error
             }
-            throw error
+        } else {
+            systemCapture = nil
+            systemCaptureURL = nil
+            logger.info("System audio capture disabled; skipping SCStream startup.")
         }
 
         self.sessionDirectoryURL = sessionDirectoryURL

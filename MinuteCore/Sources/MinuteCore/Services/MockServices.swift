@@ -223,3 +223,59 @@ public struct MockModelManager: ModelManaging {
         _ = ids
     }
 }
+
+public actor MockSilenceAutoStopController: SilenceAutoStopControlling {
+    public private(set) var snapshot = SilenceStatusSnapshot()
+
+    public init() {}
+
+    public func start(sessionID: UUID, startedAt: Date) async {
+        _ = startedAt
+        snapshot = SilenceStatusSnapshot(sessionID: sessionID, phase: .monitoring, pendingAutoStop: false)
+    }
+
+    public func stop() async {
+        snapshot.phase = .inactive
+        snapshot.pendingAutoStop = false
+    }
+
+    public func ingest(level: Float, at: Date) async {
+        _ = level
+        _ = at
+    }
+
+    public func keepRecording() async {
+        snapshot.phase = .monitoring
+        snapshot.pendingAutoStop = false
+    }
+
+    public func status() async -> SilenceStatusSnapshot {
+        snapshot
+    }
+}
+
+@MainActor
+public final class MockRecordingAlertNotifier: RecordingAlertNotifying {
+    public private(set) var silenceWarnings: [RecordingAlert] = []
+    public private(set) var sharedWindowAlerts: [RecordingAlert] = []
+
+    public init() {}
+
+    public func notifySilenceStopWarning(alert: RecordingAlert) async -> Bool {
+        silenceWarnings.append(alert)
+        return true
+    }
+
+    public func notifySharedWindowClosed(alert: RecordingAlert) async -> Bool {
+        sharedWindowAlerts.append(alert)
+        return true
+    }
+
+    public func clearSilenceStopWarning() async {
+        silenceWarnings.removeAll()
+    }
+
+    public func clearSharedWindowClosedWarning() async {
+        sharedWindowAlerts.removeAll()
+    }
+}
