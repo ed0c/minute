@@ -60,9 +60,15 @@ extract_entitlements_to_file() {
 sign_path() {
   local path="$1"
   local fallback_entitlements="${2:-}"
+  local prefer_fallback="${3:-0}"
   local extracted_entitlements
 
   if [ ! -e "$path" ]; then
+    return 0
+  fi
+
+  if [ "$prefer_fallback" = "1" ] && [ -n "$fallback_entitlements" ] && [ -f "$fallback_entitlements" ]; then
+    /usr/bin/codesign --force --timestamp --options runtime --entitlements "$fallback_entitlements" --sign "$SIGN_IDENTITY" "$path"
     return 0
   fi
 
@@ -84,7 +90,7 @@ for candidate in \
   "$APP_PATH/Contents/Resources/ffmpeg" \
   "$APP_PATH/Contents/Resources/llama-mtmd-cli"; do
   if [ -f "$candidate" ]; then
-    sign_path "$candidate" "$HELPER_ENTITLEMENTS_PATH"
+    sign_path "$candidate" "$HELPER_ENTITLEMENTS_PATH" 1
   fi
 done
 
@@ -96,22 +102,22 @@ done
 
 if [ -d "$APP_PATH/Contents/XPCServices" ]; then
   find "$APP_PATH/Contents/XPCServices" -type d -name "*.xpc" -print0 | while IFS= read -r -d '' xpc; do
-    sign_path "$xpc" "$HELPER_ENTITLEMENTS_PATH"
+    sign_path "$xpc" "$HELPER_ENTITLEMENTS_PATH" 1
   done
 fi
 
 SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework"
 if [ -d "$SPARKLE_FRAMEWORK" ]; then
   find "$SPARKLE_FRAMEWORK/Versions" -type d -name "Updater.app" -print0 2>/dev/null | while IFS= read -r -d '' updater_app; do
-    sign_path "$updater_app" "$HELPER_ENTITLEMENTS_PATH"
+    sign_path "$updater_app" "$HELPER_ENTITLEMENTS_PATH" 1
   done
 
   find "$SPARKLE_FRAMEWORK/Versions" -type d -path "*/XPCServices/*.xpc" -print0 2>/dev/null | while IFS= read -r -d '' xpc; do
-    sign_path "$xpc" "$HELPER_ENTITLEMENTS_PATH"
+    sign_path "$xpc" "$HELPER_ENTITLEMENTS_PATH" 1
   done
 
   find "$SPARKLE_FRAMEWORK/Versions" -type f -name "Autoupdate" -print0 2>/dev/null | while IFS= read -r -d '' autoupdate; do
-    sign_path "$autoupdate" "$HELPER_ENTITLEMENTS_PATH"
+    sign_path "$autoupdate" "$HELPER_ENTITLEMENTS_PATH" 1
   done
 
   sign_path "$SPARKLE_FRAMEWORK"
