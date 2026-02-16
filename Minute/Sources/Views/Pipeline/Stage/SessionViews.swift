@@ -85,7 +85,6 @@ struct RecordingSessionCardView: View {
                             Text("Configure your session and start recording.")
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(Color.minuteTextSecondary)
-
                         }
 
                         if let dropErrorMessage {

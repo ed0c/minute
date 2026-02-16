@@ -62,7 +62,8 @@ public actor ScreenContextCaptureService {
         timestampOffsetSeconds: TimeInterval = 0,
         processingBusyGate: ProcessingBusyGate? = nil,
         statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)? = nil,
-        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)? = nil
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)? = nil,
+        lifecycleEventHandler: (@Sendable (ScreenContextLifecycleEvent) -> Void)? = nil
     ) async throws {
         guard session == nil else { return }
         guard !selections.isEmpty else { return }
@@ -82,7 +83,8 @@ public actor ScreenContextCaptureService {
             processingBusyGate: processingBusyGate,
             logger: logger,
             statusHandler: statusHandler,
-            frameHandler: frameHandler
+            frameHandler: frameHandler,
+            lifecycleEventHandler: lifecycleEventHandler
         )
     }
 
@@ -105,7 +107,8 @@ public actor ScreenContextCaptureService {
         timestampOffsetSeconds: TimeInterval = 0,
         processingBusyGate: ProcessingBusyGate? = nil,
         statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)? = nil,
-        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)? = nil
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)? = nil,
+        lifecycleEventHandler: (@Sendable (ScreenContextLifecycleEvent) -> Void)? = nil
     ) async throws {
         guard session == nil else { return }
         guard !sources.isEmpty else { return }
@@ -118,7 +121,8 @@ public actor ScreenContextCaptureService {
             processingBusyGate: processingBusyGate,
             logger: logger,
             statusHandler: statusHandler,
-            frameHandler: frameHandler
+            frameHandler: frameHandler,
+            lifecycleEventHandler: lifecycleEventHandler
         )
     }
 }
@@ -126,6 +130,17 @@ public actor ScreenContextCaptureService {
 struct ScreenContextCaptureSource: Sendable {
     var windowTitle: String
     var captureImageData: @Sendable () async throws -> Data
+    var isWindowAvailable: (@Sendable () async -> Bool)?
+
+    init(
+        windowTitle: String,
+        captureImageData: @escaping @Sendable () async throws -> Data,
+        isWindowAvailable: (@Sendable () async -> Bool)? = nil
+    ) {
+        self.windowTitle = windowTitle
+        self.captureImageData = captureImageData
+        self.isWindowAvailable = isWindowAvailable
+    }
 
     fileprivate static func makeSources(from windows: [ResolvedWindow]) -> [ScreenContextCaptureSource] {
         windows.map { resolved in
@@ -133,6 +148,9 @@ struct ScreenContextCaptureSource: Sendable {
                 windowTitle: resolved.selection.windowTitle,
                 captureImageData: {
                     try await ScreenContextCaptureSession.captureImageData(for: resolved.window)
+                },
+                isWindowAvailable: {
+                    await ScreenContextCaptureSession.isWindowAvailable(windowID: resolved.window.windowID)
                 }
             )
         }
@@ -149,8 +167,10 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
     private let minimumFrameInterval: TimeInterval
     private let timestampOffsetSeconds: TimeInterval
     private let frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?
+    private let lifecycleEventHandler: (@Sendable (ScreenContextLifecycleEvent) -> Void)?
     private var captureTask: Task<Void, Never>?
     private var firstTimestampSeconds: Double?
+    private var closedWindowTitlesNotified: Set<String> = []
 
     private init(
         sources: [ScreenContextCaptureSource],
@@ -161,6 +181,7 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
         minimumFrameInterval: TimeInterval,
         timestampOffsetSeconds: TimeInterval,
         frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?,
+        lifecycleEventHandler: (@Sendable (ScreenContextLifecycleEvent) -> Void)?,
         logger: Logger
     ) {
         self.sources = sources
@@ -171,6 +192,7 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
         self.minimumFrameInterval = minimumFrameInterval
         self.timestampOffsetSeconds = timestampOffsetSeconds
         self.frameHandler = frameHandler
+        self.lifecycleEventHandler = lifecycleEventHandler
         self.logger = logger
     }
 
@@ -182,7 +204,8 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
         processingBusyGate: ProcessingBusyGate?,
         logger: Logger,
         statusHandler: (@Sendable (ScreenContextCaptureStatus) -> Void)?,
-        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?
+        frameHandler: (@Sendable (ScreenContextCapturedFrame) -> Void)?,
+        lifecycleEventHandler: (@Sendable (ScreenContextLifecycleEvent) -> Void)?
     ) async throws -> ScreenContextCaptureSession {
         let collector = ScreenContextEventCollector(maxEvents: 120)
         let statusReporter = ScreenContextStatusReporter(statusHandler: statusHandler)
@@ -197,6 +220,7 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
             minimumFrameInterval: minimumFrameInterval,
             timestampOffsetSeconds: timestampOffsetSeconds,
             frameHandler: frameHandler,
+            lifecycleEventHandler: lifecycleEventHandler,
             logger: logger
         )
         session.startCaptureLoop()
@@ -316,9 +340,26 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
                 }
             } catch {
                 statusReporter.markSkipped()
+                if let isWindowAvailable = source.isWindowAvailable {
+                    let stillAvailable = await isWindowAvailable()
+                    if !stillAvailable {
+                        await notifySharedWindowClosedIfNeeded(windowTitle: source.windowTitle)
+                    }
+                }
                 logger.error("Screen context capture failed: \(ErrorHandler.debugMessage(for: error), privacy: .public)")
             }
         }
+    }
+
+    private func notifySharedWindowClosedIfNeeded(windowTitle: String) async {
+        guard !closedWindowTitlesNotified.contains(windowTitle) else { return }
+        closedWindowTitlesNotified.insert(windowTitle)
+        lifecycleEventHandler?(
+            ScreenContextLifecycleEvent(
+                type: .sharedWindowClosed,
+                windowTitle: windowTitle
+            )
+        )
     }
 
     fileprivate static func captureImageData(for window: SCWindow) async throws -> Data {
@@ -329,6 +370,15 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
             throw MinuteError.screenCaptureUnavailable
         }
         return data
+    }
+
+    fileprivate static func isWindowAvailable(windowID: CGWindowID) async -> Bool {
+        do {
+            let content = try await fetchShareableContent()
+            return content.windows.contains { $0.windowID == windowID }
+        } catch {
+            return true
+        }
     }
 
     private static func captureImage(

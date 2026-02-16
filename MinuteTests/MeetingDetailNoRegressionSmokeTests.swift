@@ -79,21 +79,3 @@ private actor MockMeetingNotesBrowser: MeetingNotesBrowsing {
         _ = item
     }
 }
-
-private func eventually(
-    timeoutNanoseconds: UInt64,
-    pollIntervalNanoseconds: UInt64 = 10_000_000,
-    condition: @escaping @Sendable () async -> Bool
-) async throws {
-    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-    while DispatchTime.now().uptimeNanoseconds < deadline {
-        if await condition() {
-            return
-        }
-        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-    }
-
-    throw TestTimeoutError()
-}
-
-private struct TestTimeoutError: Error {}

@@ -113,6 +113,9 @@ struct PipelineContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .minuteMicActivityStartRecording)) { _ in
                 handleNotificationStartRecording()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .minuteRecordingAlertShowPipeline)) { _ in
+                notesModel.dismissOverlay()
+            }
         }
     }
 
@@ -300,6 +303,21 @@ struct PipelineContentView: View {
     }
 
     private var statusDrawerModel: StatusDrawerModel? {
+        if case .recording = model.state,
+           let warningDetail = recordingWarningDetailText() {
+            return StatusDrawerModel(
+                title: "Do you want to keep recording?",
+                detail: warningDetail,
+                progress: nil,
+                showsActivity: false,
+                isError: true,
+                actionTitle: "Keep Recording",
+                action: { model.keepRecordingFromWarning() },
+                secondaryActionTitle: nil,
+                secondaryAction: nil
+            )
+        }
+
         if model.backgroundProcessingSnapshot.activeMeetingID != nil {
             let stage = model.backgroundProcessingSnapshot.activeStage
             let progress = model.backgroundProcessingSnapshot.activeProgress
@@ -345,7 +363,7 @@ struct PipelineContentView: View {
             switch model.backgroundProcessingSnapshot.lastOutcome {
             case .failed(let message):
                 return StatusDrawerModel(
-                    title: "Background processing failed",
+                    title: "Processing failed",
                     detail: message,
                     progress: nil,
                     showsActivity: false,
@@ -357,7 +375,7 @@ struct PipelineContentView: View {
                 )
             case .canceled:
                 return StatusDrawerModel(
-                    title: "Background processing canceled",
+                    title: "Processing was canceled",
                     detail: "You can retry this meeting later.",
                     progress: nil,
                     showsActivity: false,
@@ -376,8 +394,8 @@ struct PipelineContentView: View {
            let recovery = model.recoverableRecordings.first {
             let folderName = recovery.sessionURL.lastPathComponent
             return StatusDrawerModel(
-                title: "Unfinished meeting detected",
-                detail: "An unfinished meeting was detected in \(folderName). Do you want to recover it?",
+                title: "Unfinished meeting found",
+                detail: "An unfinished meeting was found in \(folderName). Do you want to recover it?",
                 progress: nil,
                 showsActivity: false,
                 isError: false,
@@ -440,6 +458,23 @@ struct PipelineContentView: View {
         default:
             return nil
         }
+    }
+
+    private func recordingWarningDetailText() -> String? {
+        var parts: [String] = []
+
+        if let silenceMessage = model.activeSilenceWarningMessage {
+            let countdown = model.activeSilenceWarningSecondsRemaining.map { " (\($0)s)" } ?? ""
+            parts.append("\(silenceMessage)\(countdown)")
+        }
+
+        if let screenMessage = model.activeScreenContextAlertMessage {
+            let countdown = model.activeScreenContextWarningSecondsRemaining.map { " (\($0)s)" } ?? ""
+            parts.append("\(screenMessage)\(countdown)")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " • ")
     }
 
     private func mainSessionBottomInset(isCompact: Bool) -> CGFloat {

@@ -105,13 +105,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
             title: "Start Recording",
             options: [.foreground]
         )
-        let category = UNNotificationCategory(
+        let micCategory = UNNotificationCategory(
             identifier: MicActivityNotification.categoryIdentifier,
             actions: [startAction],
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([category])
+
+        let keepRecordingAction = UNNotificationAction(
+            identifier: RecordingAlertNotification.keepRecordingActionIdentifier,
+            title: "Keep Recording",
+            options: [.foreground]
+        )
+        let silenceWarningCategory = UNNotificationCategory(
+            identifier: RecordingAlertNotification.silenceWarningCategoryIdentifier,
+            actions: [keepRecordingAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        let sharedWindowClosedCategory = UNNotificationCategory(
+            identifier: RecordingAlertNotification.sharedWindowClosedCategoryIdentifier,
+            actions: [keepRecordingAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        center.setNotificationCategories([micCategory, silenceWarningCategory, sharedWindowClosedCategory])
     }
 
     func userNotificationCenter(
@@ -119,7 +138,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if notification.request.content.categoryIdentifier == MicActivityNotification.categoryIdentifier {
+        let category = notification.request.content.categoryIdentifier
+        if category == MicActivityNotification.categoryIdentifier ||
+            category == RecordingAlertNotification.silenceWarningCategoryIdentifier ||
+            category == RecordingAlertNotification.sharedWindowClosedCategoryIdentifier {
             completionHandler([.banner, .sound])
         } else {
             completionHandler([])
@@ -132,15 +154,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
-        guard response.notification.request.content.categoryIdentifier == MicActivityNotification.categoryIdentifier else {
+        let category = response.notification.request.content.categoryIdentifier
+
+        if category == MicActivityNotification.categoryIdentifier {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .minuteMicActivityShowPipeline, object: nil)
+
+            if response.actionIdentifier == MicActivityNotification.startActionIdentifier {
+                NotificationCenter.default.post(name: .minuteMicActivityStartRecording, object: nil)
+            }
             return
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-        NotificationCenter.default.post(name: .minuteMicActivityShowPipeline, object: nil)
-
-        if response.actionIdentifier == MicActivityNotification.startActionIdentifier {
-            NotificationCenter.default.post(name: .minuteMicActivityStartRecording, object: nil)
+        if category == RecordingAlertNotification.silenceWarningCategoryIdentifier ||
+            category == RecordingAlertNotification.sharedWindowClosedCategoryIdentifier {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .minuteRecordingAlertShowPipeline, object: nil)
+            if response.actionIdentifier == RecordingAlertNotification.keepRecordingActionIdentifier {
+                NotificationCenter.default.post(name: .minuteRecordingAlertKeepRecording, object: nil)
+            }
         }
     }
 }

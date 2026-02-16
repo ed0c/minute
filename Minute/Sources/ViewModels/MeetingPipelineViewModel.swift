@@ -86,6 +86,10 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var screenInferenceStatus: ScreenInferenceStatus? = nil
     @Published private(set) var latestScreenCaptureImage: NSImage? = nil
     @Published private(set) var recoverableRecordings: [RecoverableRecording] = []
+    @Published private(set) var silenceStatus: SilenceStatusSnapshot = SilenceStatusSnapshot()
+    @Published private(set) var activeSilenceAlert: RecordingAlert? = nil
+    @Published private(set) var activeScreenContextAlert: RecordingAlert? = nil
+    @Published private(set) var recordingSessionEvents: [RecordingSessionEvent] = []
     @Published var meetingType: MeetingType = .autodetect
     @Published var languageProcessing: LanguageProcessingProfile = .autoToEnglish
     @Published var outputLanguage: OutputLanguage = .defaultSelection
@@ -116,6 +120,22 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
     }
 
+    var activeSilenceWarningMessage: String? {
+        activeSilenceAlert?.message
+    }
+
+    var activeSilenceWarningSecondsRemaining: Int? {
+        activeSilenceAlert?.expiresAt.map { max(Int(ceil($0.timeIntervalSinceNow)), 0) }
+    }
+
+    var activeScreenContextAlertMessage: String? {
+        activeScreenContextAlert?.message
+    }
+
+    var activeScreenContextWarningSecondsRemaining: Int? {
+        activeScreenContextAlert?.expiresAt.map { max(Int(ceil($0.timeIntervalSinceNow)), 0) }
+    }
+
     private let audioService: any AudioServicing
     private let mediaImportService: any MediaImporting
     private let recoveryService: any RecordingRecoveryServicing
@@ -127,6 +147,8 @@ final class MeetingPipelineViewModel: ObservableObject {
     private let screenContextSettingsStore: ScreenContextSettingsStore
     private let recordingPermissions: RecordingPermissions
     private let stagePreferencesStore: StagePreferencesStore
+    private let silenceDetectionPolicy: SilenceDetectionPolicy
+    private let recordingAlertNotifier: any RecordingAlertNotifying
 
     private let vaultAccess: VaultAccess
 
@@ -147,6 +169,8 @@ final class MeetingPipelineViewModel: ObservableObject {
     private var screenContextFrameIntervalSeconds: TimeInterval {
         screenContextSettingsStore.captureIntervalSeconds
     }
+    private var silenceController: (any SilenceAutoStopControlling)?
+    private var screenContextAutoStopTask: Task<Void, Never>?
 	
     init(
         audioService: some AudioServicing,
@@ -158,7 +182,9 @@ final class MeetingPipelineViewModel: ObservableObject {
         screenContextSettingsStore: ScreenContextSettingsStore,
         vaultAccess: VaultAccess,
         recordingPermissions: RecordingPermissions = .live(),
-        stagePreferencesStore: StagePreferencesStore = StagePreferencesStore()
+        stagePreferencesStore: StagePreferencesStore = StagePreferencesStore(),
+        silenceDetectionPolicy: SilenceDetectionPolicy = .default,
+        recordingAlertNotifier: (any RecordingAlertNotifying)? = nil
     ) {
         self.audioService = audioService
         self.mediaImportService = mediaImportService
@@ -172,6 +198,8 @@ final class MeetingPipelineViewModel: ObservableObject {
         self.screenContextSettingsStore = screenContextSettingsStore
         self.recordingPermissions = recordingPermissions
         self.stagePreferencesStore = stagePreferencesStore
+        self.silenceDetectionPolicy = silenceDetectionPolicy
+        self.recordingAlertNotifier = recordingAlertNotifier ?? RecordingAlertNotificationCoordinator()
         self.vaultAccess = vaultAccess
         self.screenCaptureEnabled = screenContextSettingsStore.isEnabled
 
@@ -190,6 +218,7 @@ final class MeetingPipelineViewModel: ObservableObject {
             }
 
         startStagePreferencesObservation()
+        startRecordingAlertActionObservation()
 
         refreshRecoverableRecordings()
 
@@ -255,12 +284,26 @@ final class MeetingPipelineViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func startRecordingAlertActionObservation() {
+        NotificationCenter.default.publisher(for: .minuteRecordingAlertKeepRecording)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.keepRecordingFromWarning()
+            }
+            .store(in: &cancellables)
+    }
+
     deinit {
         processingTask?.cancel()
         backgroundProcessingObserverTask?.cancel()
+        screenContextAutoStopTask?.cancel()
         let captureService = screenContextCaptureService
+        let silenceController = silenceController
         Task { [captureService] in
             await captureService.cancelCapture()
+        }
+        Task { [silenceController] in
+            await silenceController?.stop()
         }
     }
 
@@ -577,6 +620,14 @@ final class MeetingPipelineViewModel: ObservableObject {
                 screenInferenceStatus = nil
                 screenCaptureBaseProcessedCount = 0
                 screenCaptureBaseSkippedCount = 0
+                recordingSessionEvents = []
+                screenContextAutoStopTask?.cancel()
+                screenContextAutoStopTask = nil
+                activeSilenceAlert = nil
+                activeScreenContextAlert = nil
+                silenceStatus = SilenceStatusSnapshot()
+                await recordingAlertNotifier.clearSilenceStopWarning()
+                await recordingAlertNotifier.clearSharedWindowClosedWarning()
 
                 let session = RecordingSession()
                 await applyAudioCaptureToggles()
@@ -586,24 +637,31 @@ final class MeetingPipelineViewModel: ObservableObject {
                 resetAudioLevelSamples()
                 state = .recording(session: session)
                 captureState = .recording
+                await startSilenceMonitoring(for: session)
             } catch let minuteError as MinuteError {
                 await stopAudioLevelMonitoring()
                 await screenContextCaptureService.cancelCapture()
+                await stopSilenceMonitoring()
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureSelection = nil
                 screenCaptureBaseProcessedCount = 0
                 screenCaptureBaseSkippedCount = 0
+                await clearActiveRecordingWarnings()
+                silenceStatus = SilenceStatusSnapshot()
                 state = .failed(error: minuteError, debugOutput: minuteError.debugSummary)
                 captureState = .ready
             } catch {
                 await stopAudioLevelMonitoring()
                 await screenContextCaptureService.cancelCapture()
+                await stopSilenceMonitoring()
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureSelection = nil
                 screenCaptureBaseProcessedCount = 0
                 screenCaptureBaseSkippedCount = 0
+                await clearActiveRecordingWarnings()
+                silenceStatus = SilenceStatusSnapshot()
                 state = .failed(error: .audioExportFailed, debugOutput: ErrorHandler.debugMessage(for: error))
                 captureState = .ready
             }
@@ -611,11 +669,12 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     private func cancelSessionIfAllowed() {
-        guard case .recording = state else { return }
+        guard case .recording(let session) = state else { return }
         guard captureState == .recording else { return }
 
         Task {
             await stopAudioLevelMonitoring()
+            await stopSilenceMonitoring()
             resetAudioLevelSamples()
             await screenContextCaptureService.cancelCapture()
             screenInferenceStatus = nil
@@ -624,6 +683,9 @@ final class MeetingPipelineViewModel: ObservableObject {
             latestScreenCaptureImage = nil
             screenCaptureBaseProcessedCount = 0
             screenCaptureBaseSkippedCount = 0
+            appendRecordingSessionEvent(.recordingCanceled, sessionID: session.id)
+            await clearActiveRecordingWarnings()
+            silenceStatus = SilenceStatusSnapshot()
 
             await audioService.cancelRecording()
 
@@ -633,7 +695,13 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
     }
 
-    private func stopRecordingIfAllowed() {
+    private enum StopRecordingTrigger {
+        case manual
+        case silenceAutoStop
+        case screenContextAutoStop
+    }
+
+    private func stopRecordingIfAllowed(trigger: StopRecordingTrigger = .manual) {
         guard case .recording(let session) = state else { return }
         guard captureState == .recording else { return }
 
@@ -641,10 +709,16 @@ final class MeetingPipelineViewModel: ObservableObject {
 
         Task {
             do {
+                if trigger == .manual {
+                    appendRecordingSessionEvent(.manualStop, sessionID: session.id)
+                }
                 let result = try await audioService.stopRecording()
+                await stopSilenceMonitoring()
                 _ = await stopScreenContextCaptureAndAppend()
                 await stopAudioLevelMonitoring()
                 resetAudioLevelSamples()
+                await clearActiveRecordingWarnings()
+                silenceStatus = SilenceStatusSnapshot()
 
                 guard let context = makePipelineContext(
                     audioTempURL: result.wavURL,
@@ -675,21 +749,27 @@ final class MeetingPipelineViewModel: ObservableObject {
             } catch let minuteError as MinuteError {
                 await stopAudioLevelMonitoring()
                 await screenContextCaptureService.cancelCapture()
+                await stopSilenceMonitoring()
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureSelection = nil
                 screenCaptureBaseProcessedCount = 0
                 screenCaptureBaseSkippedCount = 0
+                await clearActiveRecordingWarnings()
+                silenceStatus = SilenceStatusSnapshot()
                 state = .failed(error: minuteError, debugOutput: minuteError.debugSummary)
                 captureState = .ready
             } catch {
                 await stopAudioLevelMonitoring()
                 await screenContextCaptureService.cancelCapture()
+                await stopSilenceMonitoring()
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureSelection = nil
                 screenCaptureBaseProcessedCount = 0
                 screenCaptureBaseSkippedCount = 0
+                await clearActiveRecordingWarnings()
+                silenceStatus = SilenceStatusSnapshot()
                 state = .failed(error: .audioExportFailed, debugOutput: ErrorHandler.debugMessage(for: error))
                 captureState = .ready
             }
@@ -814,7 +894,16 @@ final class MeetingPipelineViewModel: ObservableObject {
         screenCaptureSelection = nil
         screenCaptureBaseProcessedCount = 0
         screenCaptureBaseSkippedCount = 0
+        screenContextAutoStopTask?.cancel()
+        screenContextAutoStopTask = nil
+        activeSilenceAlert = nil
+        activeScreenContextAlert = nil
+        silenceStatus = SilenceStatusSnapshot()
         meetingType = .autodetect
+        Task { @MainActor [recordingAlertNotifier] in
+            await recordingAlertNotifier.clearSilenceStopWarning()
+            await recordingAlertNotifier.clearSharedWindowClosedWarning()
+        }
     }
 
     private func applyAudioCaptureToggles() async {
@@ -837,6 +926,213 @@ final class MeetingPipelineViewModel: ObservableObject {
     private func updateLatestScreenCaptureImage(_ frame: ScreenContextCapturedFrame) {
         guard let image = NSImage(data: frame.imageData) else { return }
         latestScreenCaptureImage = image
+    }
+
+    private func startSilenceMonitoring(for session: RecordingSession) async {
+        let controller = SilenceAutoStopController(
+            policy: silenceDetectionPolicy,
+            onEvent: { [weak self] event in
+                Task { @MainActor [weak self] in
+                    await self?.handleSilenceEvent(event)
+                }
+            }
+        )
+        silenceController = controller
+        await controller.start(sessionID: session.id, startedAt: session.startedAt)
+    }
+
+    private func stopSilenceMonitoring() async {
+        guard let silenceController else { return }
+        await silenceController.stop()
+        self.silenceController = nil
+    }
+
+    private func clearScreenContextAutoStopWarning(logKeepSelection: Bool = false) async {
+        screenContextAutoStopTask?.cancel()
+        screenContextAutoStopTask = nil
+
+        if logKeepSelection, let alert = activeScreenContextAlert {
+            appendRecordingSessionEvent(
+                .keepRecordingSelected,
+                metadata: ["source": "screen_window_closed"],
+                sessionID: alert.sessionID
+            )
+        }
+
+        activeScreenContextAlert = nil
+        await recordingAlertNotifier.clearSharedWindowClosedWarning()
+    }
+
+    private func clearActiveRecordingWarnings() async {
+        activeSilenceAlert = nil
+        await recordingAlertNotifier.clearSilenceStopWarning()
+        await clearScreenContextAutoStopWarning()
+    }
+
+    private func beginScreenContextAutoStopWarning(session: RecordingSession, windowTitle: String) {
+        guard activeScreenContextAlert == nil else { return }
+
+        let warningSeconds = Int(silenceDetectionPolicy.warningCountdownSeconds)
+        let now = Date()
+        let expiresAt = now.addingTimeInterval(silenceDetectionPolicy.warningCountdownSeconds)
+        let alert = RecordingAlert(
+            type: .screenWindowClosedStopWarning,
+            sessionID: session.id,
+            message: "Shared window closed: \(windowTitle). Recording will stop in \(warningSeconds) seconds unless you keep recording.",
+            issuedAt: now,
+            expiresAt: expiresAt,
+            actions: [.keepRecording]
+        )
+
+        activeScreenContextAlert = alert
+        appendRecordingSessionEvent(
+            .screenWindowClosedNotified,
+            metadata: [
+                "window_title": windowTitle,
+                "countdown_seconds": "\(warningSeconds)",
+                "stop_pending": "true"
+            ],
+            sessionID: session.id
+        )
+
+        screenContextAutoStopTask?.cancel()
+        let countdownNanoseconds = UInt64(max(silenceDetectionPolicy.warningCountdownSeconds, 0) * 1_000_000_000)
+        screenContextAutoStopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: countdownNanoseconds)
+            guard !Task.isCancelled else { return }
+            await self?.triggerScreenContextAutoStopIfNeeded(alertID: alert.id, sessionID: session.id)
+        }
+
+        Task { @MainActor [recordingAlertNotifier] in
+            _ = await recordingAlertNotifier.notifySharedWindowClosed(alert: alert)
+        }
+    }
+
+    private func triggerScreenContextAutoStopIfNeeded(alertID: UUID, sessionID: UUID) async {
+        guard case .recording(let currentSession) = state, currentSession.id == sessionID else { return }
+        guard activeScreenContextAlert?.id == alertID else { return }
+
+        appendRecordingSessionEvent(
+            .autoStopExecuted,
+            metadata: ["source": "screen_window_closed"],
+            sessionID: sessionID
+        )
+
+        await clearScreenContextAutoStopWarning()
+        stopRecordingIfAllowed(trigger: .screenContextAutoStop)
+    }
+
+    private func handleSilenceEvent(_ event: SilenceAutoStopEvent) async {
+        switch event {
+        case .statusChanged(let snapshot):
+            silenceStatus = snapshot
+        case .warningStarted(let alert):
+            activeSilenceAlert = alert
+            appendRecordingSessionEvent(
+                .silenceWarningIssued,
+                metadata: ["countdown_seconds": "\(Int(silenceDetectionPolicy.warningCountdownSeconds))"],
+                sessionID: alert.sessionID
+            )
+            _ = await recordingAlertNotifier.notifySilenceStopWarning(alert: alert)
+        case .warningCanceledBySpeech:
+            if let sessionID = silenceStatus.sessionID {
+                appendRecordingSessionEvent(.warningCanceledBySpeech, sessionID: sessionID)
+            }
+            activeSilenceAlert = nil
+            await recordingAlertNotifier.clearSilenceStopWarning()
+        case .warningCanceledByUser:
+            if let sessionID = silenceStatus.sessionID {
+                appendRecordingSessionEvent(
+                    .keepRecordingSelected,
+                    metadata: ["source": "silence"],
+                    sessionID: sessionID
+                )
+            }
+            activeSilenceAlert = nil
+            await recordingAlertNotifier.clearSilenceStopWarning()
+        case .autoStopTriggered:
+            if let sessionID = silenceStatus.sessionID {
+                appendRecordingSessionEvent(
+                    .autoStopExecuted,
+                    metadata: ["source": "silence"],
+                    sessionID: sessionID
+                )
+            }
+            activeSilenceAlert = nil
+            await recordingAlertNotifier.clearSilenceStopWarning()
+            stopRecordingIfAllowed(trigger: .silenceAutoStop)
+        }
+    }
+
+    private func appendRecordingSessionEvent(
+        _ eventType: RecordingSessionEventType,
+        metadata: [String: String] = [:],
+        sessionID: UUID? = nil
+    ) {
+        let resolvedSessionID = sessionID ?? currentRecordingSessionID ?? silenceStatus.sessionID
+        guard let resolvedSessionID else { return }
+
+        recordingSessionEvents.append(
+            RecordingSessionEvent(
+                sessionID: resolvedSessionID,
+                eventType: eventType,
+                metadata: metadata
+            )
+        )
+    }
+
+    private var currentRecordingSessionID: UUID? {
+        if case .recording(let session) = state {
+            return session.id
+        }
+        return silenceStatus.sessionID
+    }
+
+    func keepRecordingFromWarning() {
+        Task { [silenceController] in
+            await silenceController?.keepRecording()
+        }
+        Task { @MainActor [weak self] in
+            await self?.clearScreenContextAutoStopWarning(logKeepSelection: true)
+        }
+    }
+
+    func acknowledgeActiveScreenContextAlert() {
+        guard let alertID = activeScreenContextAlert?.id else { return }
+        _ = acknowledgeAlert(alertID: alertID)
+    }
+
+    @discardableResult
+    func acknowledgeAlert(alertID: UUID) -> Bool {
+        if activeScreenContextAlert?.id == alertID {
+            activeScreenContextAlert?.status = .resolved
+            screenContextAutoStopTask?.cancel()
+            screenContextAutoStopTask = nil
+            activeScreenContextAlert = nil
+            Task { @MainActor [recordingAlertNotifier] in
+                await recordingAlertNotifier.clearSharedWindowClosedWarning()
+            }
+            return true
+        }
+        return false
+    }
+
+    func currentSilenceStatusSnapshot() -> SilenceStatusSnapshot {
+        silenceStatus
+    }
+
+    func sessionEvents(for sessionID: UUID) -> [RecordingSessionEvent] {
+        recordingSessionEvents.filter { $0.sessionID == sessionID }
+    }
+
+    private func handleScreenContextLifecycleEvent(_ event: ScreenContextLifecycleEvent) {
+        guard case .recording(let session) = state else { return }
+        guard event.type == .sharedWindowClosed else { return }
+        beginScreenContextAutoStopWarning(session: session, windowTitle: event.windowTitle)
+    }
+
+    func _testHandleScreenContextLifecycleEvent(_ event: ScreenContextLifecycleEvent) {
+        handleScreenContextLifecycleEvent(event)
     }
 
     // MARK: - Pipeline
@@ -870,6 +1166,11 @@ final class MeetingPipelineViewModel: ObservableObject {
                 frameHandler: { [weak self] frame in
                     Task { @MainActor [weak self] in
                         self?.updateLatestScreenCaptureImage(frame)
+                    }
+                },
+                lifecycleEventHandler: { [weak self] lifecycleEvent in
+                    Task { @MainActor [weak self] in
+                        self?.handleScreenContextLifecycleEvent(lifecycleEvent)
                     }
                 }
             )
@@ -1087,6 +1388,13 @@ final class MeetingPipelineViewModel: ObservableObject {
         let quantized = (clamped * 8).rounded() / 8
         audioLevelSamples.removeFirst()
         audioLevelSamples.append(CGFloat(quantized))
+
+        if case .recording = state {
+            let silenceController = silenceController
+            Task {
+                await silenceController?.ingest(level: clamped, at: Date())
+            }
+        }
     }
 
     // MARK: - Permissions
