@@ -20,6 +20,7 @@
 		B6A1D9E2F3C44C7AA1B2C3D4 /* MeetingPipelineViewModelCancelSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F6C0A0B4D94B0B9F4E0C1A /* MeetingPipelineViewModelCancelSessionTests.swift */; };
 		BF27CF187A62466DB14F257B /* MinuteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F15E3BAE1404A58B205DD07 /* MinuteTests.swift */; };
 		C7F3A9E4D2B8410FA1C0B2D3 /* MeetingDetailNoRegressionSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D2C3B4E5F6478899AABBCC /* MeetingDetailNoRegressionSmokeTests.swift */; };
+		F2B1C3D4E5F60718293A4B5C /* SilenceAutoStopTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A9F20B6C3D4E5F8091A2B3 /* SilenceAutoStopTestSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 		A1D2C3B4E5F6478899AABBCC /* MeetingDetailNoRegressionSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailNoRegressionSmokeTests.swift; sourceTree = "<group>"; };
 		A3F6C0A0B4D94B0B9F4E0C1A /* MeetingPipelineViewModelCancelSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipelineViewModelCancelSessionTests.swift; sourceTree = "<group>"; };
 		D4E7D1B0A9B34B87B2E6A123 /* StageDropValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageDropValidationTests.swift; sourceTree = "<group>"; };
+		E1A9F20B6C3D4E5F8091A2B3 /* SilenceAutoStopTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport/SilenceAutoStopTestSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -141,6 +143,7 @@
 				A3F6C0A0B4D94B0B9F4E0C1A /* MeetingPipelineViewModelCancelSessionTests.swift */,
 				D4E7D1B0A9B34B87B2E6A123 /* StageDropValidationTests.swift */,
 				A1D2C3B4E5F6478899AABBCC /* MeetingDetailNoRegressionSmokeTests.swift */,
+				E1A9F20B6C3D4E5F8091A2B3 /* SilenceAutoStopTestSupport.swift */,
 				5F15E3BAE1404A58B205DD07 /* MinuteTests.swift */,
 			);
 			path = MinuteTests;
@@ -408,6 +411,7 @@
 				B6A1D9E2F3C44C7AA1B2C3D4 /* MeetingPipelineViewModelCancelSessionTests.swift in Sources */,
 				1A2B3C4D5E6F7890ABCDEF12 /* StageDropValidationTests.swift in Sources */,
 				C7F3A9E4D2B8410FA1C0B2D3 /* MeetingDetailNoRegressionSmokeTests.swift in Sources */,
+				F2B1C3D4E5F60718293A4B5C /* SilenceAutoStopTestSupport.swift in Sources */,
 				BF27CF187A62466DB14F257B /* MinuteTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
