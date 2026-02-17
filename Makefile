@@ -23,7 +23,7 @@ MINUTE_APP_ENTITLEMENTS_FILE ?=
 MINUTE_HELPER_ENTITLEMENTS_FILE ?=
 MINUTE_WHISPER_SERVICE_ENTITLEMENTS ?=
 
-.PHONY: help release appcast archive test test-all
+.PHONY: help release appcast archive test test-all version-show bump-build bump-version bump-version-major bump-version-minor bump-version-patch
 
 help:
 	@echo "Minute release targets"
@@ -34,6 +34,10 @@ help:
 	@echo "  make release DIST_PROFILE=direct ARCHIVE=/path/to/Minute.xcarchive"
 	@echo "  make release DIST_PROFILE=app-store ARCHIVE=/path/to/Minute.xcarchive"
 	@echo "  make appcast DIST_PROFILE=direct OUTPUT_DIR=updates"
+	@echo "  make version-show"
+	@echo "  make bump-build"
+	@echo "  make bump-version VERSION=X.Y.Z [NO_BUILD_BUMP=1]"
+	@echo "  make bump-version-patch|bump-version-minor|bump-version-major"
 	@echo ""
 	@echo "Optional overrides:"
 	@echo "  ENABLE_NOTARIZATION=0 (skip direct-profile notarization for dry-runs)"
@@ -113,3 +117,30 @@ test:
 
 test-all:
 	xcodebuild -workspace "$(WORKSPACE)" -scheme Minute -configuration Debug test
+
+version-show:
+	scripts/bump-version.sh --show
+
+bump-build:
+	scripts/bump-version.sh --bump-build
+
+bump-version:
+	@set -e; \
+	if [ -z "$(VERSION)" ]; then \
+	  echo "Usage: make bump-version VERSION=X.Y.Z [NO_BUILD_BUMP=1]" >&2; \
+	  exit 1; \
+	fi; \
+	if [ "$(NO_BUILD_BUMP)" = "1" ]; then \
+	  scripts/bump-version.sh --set-version "$(VERSION)" --no-build-bump; \
+	else \
+	  scripts/bump-version.sh --set-version "$(VERSION)"; \
+	fi
+
+bump-version-major:
+	scripts/bump-version.sh --bump-version major
+
+bump-version-minor:
+	scripts/bump-version.sh --bump-version minor
+
+bump-version-patch:
+	scripts/bump-version.sh --bump-version patch

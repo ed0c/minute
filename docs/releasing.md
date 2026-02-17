@@ -46,6 +46,24 @@ Default summary path: `updates/release-validation-summary.json`
    DIST_PROFILE=direct scripts/generate-appcast.sh updates "https://github.com/roblibob/Minute/releases/download/vX.Y.Z/"
    ```
 
+## Version + Build Bumps
+
+Use the bundled helper to automate `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`:
+
+```bash
+make version-show
+make bump-build
+make bump-version VERSION=0.18.0
+make bump-version-patch
+make bump-version-minor
+make bump-version-major
+```
+
+Notes:
+- `bump-build` increments `CURRENT_PROJECT_VERSION` by 1.
+- `bump-version VERSION=X.Y.Z` sets `MARKETING_VERSION` and also bumps build by 1.
+- To set only `MARKETING_VERSION` without bumping build: `make bump-version VERSION=X.Y.Z NO_BUILD_BUMP=1`.
+
 ## Dry-Run Mode
 
 For validation-only runs without notarization:
