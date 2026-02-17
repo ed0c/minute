@@ -1,7 +1,7 @@
 import Foundation
-import MinuteCore
 import Testing
 @testable import Minute
+@testable import MinuteCore
 
 struct MeetingPipelineViewModelCancelSessionTests {
     @Test
@@ -173,6 +173,185 @@ struct MeetingPipelineViewModelCancelSessionTests {
             model = nil
         }
     }
+
+    @Test
+    func startRecording_whileImportingMedia_isIgnored() async throws {
+        let audioService = TestAudioService()
+        let importService = BlockingMediaImportService()
+
+        let suiteName = "MeetingPipelineViewModelImportingStartRecordingTests"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+        stagePreferencesStore.clear()
+
+        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
+
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: summarizationServiceProvider,
+            modelManager: MockModelManager(),
+            vaultAccess: coordinatorVaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        var model: MeetingPipelineViewModel? = await MainActor.run {
+            MeetingPipelineViewModel(
+                audioService: audioService,
+                mediaImportService: importService,
+                recoveryService: MockRecordingRecoveryService(),
+                pipelineCoordinator: coordinator,
+                screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
+                screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+                screenContextSettingsStore: ScreenContextSettingsStore(),
+                vaultAccess: viewModelVaultAccess,
+                recordingPermissions: .alwaysGranted(),
+                stagePreferencesStore: stagePreferencesStore
+            )
+        }
+
+        await MainActor.run {
+            model?.send(.importFile(URL(fileURLWithPath: "/tmp/input.mov")))
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            let didStartImport = await importService.didStartImport
+            let isImporting = await MainActor.run {
+                guard let model else { return false }
+                if case .importing = model.state {
+                    return true
+                }
+                return false
+            }
+            return didStartImport && isImporting
+        }
+
+        await MainActor.run {
+            model?.send(.startRecording)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let observed = await audioService.observed
+        #expect(observed.startRecordingCalls == 0)
+
+        let isStillImporting = await MainActor.run {
+            guard let model else { return false }
+            if case .importing = model.state {
+                return true
+            }
+            return false
+        }
+        #expect(isStillImporting)
+
+        await importService.finishImport()
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                if case .recorded = model.state {
+                    return true
+                }
+                return false
+            }
+        }
+
+        await MainActor.run {
+            model = nil
+        }
+    }
+
+    @Test
+    func changingScreenContextSelectionWhileRecording_restartsCaptureSession() async throws {
+        let captureService = ScreenContextCaptureService(inferencer: MockScreenContextInferenceService())
+        let seededSource = ScreenContextCaptureSource(
+            windowTitle: "Seeded Window",
+            captureImageData: {
+                Data([0x01, 0x02, 0x03, 0x04])
+            }
+        )
+        try await captureService._testStartCapture(
+            sources: [seededSource],
+            minimumFrameInterval: 1.0
+        )
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+
+        let audioService = TestAudioService()
+
+        let suiteName = "MeetingPipelineViewModelScreenContextSelectionSwitchTests"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+        stagePreferencesStore.clear()
+
+        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
+
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: summarizationServiceProvider,
+            modelManager: MockModelManager(),
+            vaultAccess: coordinatorVaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        var model: MeetingPipelineViewModel? = await MainActor.run {
+            MeetingPipelineViewModel(
+                audioService: audioService,
+                mediaImportService: MockMediaImportService(),
+                recoveryService: MockRecordingRecoveryService(),
+                pipelineCoordinator: coordinator,
+                screenContextCaptureService: captureService,
+                screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+                screenContextSettingsStore: ScreenContextSettingsStore(),
+                vaultAccess: viewModelVaultAccess,
+                recordingPermissions: .alwaysGranted(),
+                stagePreferencesStore: stagePreferencesStore
+            )
+        }
+
+        await MainActor.run {
+            model?.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                if case .recording = model.state {
+                    return true
+                }
+                return false
+            }
+        }
+
+        await MainActor.run {
+            model?.setScreenCaptureEnabled(true)
+            model?.setScreenCaptureSelection(
+                ScreenContextWindowSelection(
+                    bundleIdentifier: "com.example.switch",
+                    applicationName: "Switch App",
+                    windowTitle: "Switch Window"
+                )
+            )
+        }
+
+        try await eventually(timeoutNanoseconds: 2_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                return (model.screenInferenceStatus?.processedCount ?? 0) > 0
+            }
+        }
+
+        await MainActor.run {
+            model?.send(.cancelRecording)
+            model = nil
+        }
+    }
 }
 
 private actor TestAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling {
@@ -241,6 +420,32 @@ private actor RecordingPermissionProbe {
             microphoneRequests: microphoneRequests,
             screenRecordingRequests: screenRecordingRequests
         )
+    }
+}
+
+private actor BlockingMediaImportService: MediaImporting {
+    private var continuation: CheckedContinuation<MediaImportResult, Error>?
+    private(set) var didStartImport = false
+
+    func importMedia(from sourceURL: URL) async throws -> MediaImportResult {
+        _ = sourceURL
+        didStartImport = true
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func finishImport() {
+        guard let continuation else { return }
+        self.continuation = nil
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-import-blocked-\(UUID().uuidString).wav")
+        try? Data().write(to: url, options: [.atomic])
+        continuation.resume(returning: MediaImportResult(
+            wavURL: url,
+            duration: 0,
+            suggestedStartDate: Date()
+        ))
     }
 }
 

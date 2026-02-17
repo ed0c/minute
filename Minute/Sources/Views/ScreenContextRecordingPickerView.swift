@@ -220,7 +220,7 @@ struct ScreenContextWindowPickerPopover: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if windows.isEmpty {
             VStack(spacing: 10) {
-                Image(systemName: "display.slash")
+                Image(systemName: "display")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(Color.minuteTextMuted)
                 Text("No shareable windows found.")
