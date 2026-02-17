@@ -591,6 +591,7 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     private func startRecordingIfAllowed(selection: ScreenContextWindowSelection?) {
         guard captureState == .ready else { return }
+        guard !state.canCancelProcessing else { return }
 
         let resolvedSelection: ScreenContextWindowSelection? = {
             if let selection { return selection }
