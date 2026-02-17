@@ -20,6 +20,7 @@ struct PipelineContentView: View {
     @State private var isDropTargeted = false
     @State private var sessionDropErrorMessage: String?
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+    @State private var dismissedStatusDrawerID: String?
 
     private let compactHeightThreshold: CGFloat = 620
     private let floatingBarHeight: CGFloat = 88
@@ -86,6 +87,7 @@ struct PipelineContentView: View {
                 if case let .done(noteURL, _) = newState {
                     notesModel.refreshAndSelect(noteURL: noteURL)
                 }
+                syncDismissedStatusDrawer(with: newState)
                 micActivityCoordinator.updatePipelineState(newState)
             }
             .onReceive(model.$lastBackgroundProcessedNoteURL.compactMap { $0 }) { noteURL in
@@ -303,6 +305,11 @@ struct PipelineContentView: View {
     }
 
     private var statusDrawerModel: StatusDrawerModel? {
+        if let dismissibleID = dismissibleStatusDrawerID(for: model.state),
+           dismissibleID == dismissedStatusDrawerID {
+            return nil
+        }
+
         if case .recording = model.state,
            let warningDetail = recordingWarningDetailText() {
             return StatusDrawerModel(
@@ -441,7 +448,8 @@ struct PipelineContentView: View {
                 actionTitle: "Reveal in Finder",
                 action: { model.revealInFinder(noteURL) },
                 secondaryActionTitle: nil,
-                secondaryAction: nil
+                secondaryAction: nil,
+                onClose: { dismissCurrentStatusDrawer() }
             )
         case .failed(let error, _):
             return StatusDrawerModel(
@@ -453,7 +461,8 @@ struct PipelineContentView: View {
                 actionTitle: nil,
                 action: nil,
                 secondaryActionTitle: nil,
-                secondaryAction: nil
+                secondaryAction: nil,
+                onClose: { dismissCurrentStatusDrawer() }
             )
         default:
             return nil
@@ -485,6 +494,29 @@ struct PipelineContentView: View {
         let spacing: CGFloat = isCompact ? 6 : 10
         let bottomPadding: CGFloat = isCompact ? 12 : 22
         return bottomPadding + floatingBarHeight + spacing
+    }
+
+    private func dismissCurrentStatusDrawer() {
+        guard let id = dismissibleStatusDrawerID(for: model.state) else { return }
+        dismissedStatusDrawerID = id
+    }
+
+    private func syncDismissedStatusDrawer(with state: MeetingPipelineState) {
+        guard let dismissedStatusDrawerID else { return }
+        if dismissibleStatusDrawerID(for: state) != dismissedStatusDrawerID {
+            self.dismissedStatusDrawerID = nil
+        }
+    }
+
+    private func dismissibleStatusDrawerID(for state: MeetingPipelineState) -> String? {
+        switch state {
+        case .recorded(let audioTempURL, _, let startedAt, let stoppedAt):
+            return "recorded:\(audioTempURL.path):\(startedAt.timeIntervalSinceReferenceDate):\(stoppedAt.timeIntervalSinceReferenceDate)"
+        case .done(let noteURL, _):
+            return "done:\(noteURL.path)"
+        default:
+            return nil
+        }
     }
 
     private func handleRecordButtonTap() {
