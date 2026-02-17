@@ -1212,22 +1212,25 @@ final class MeetingPipelineViewModel: ObservableObject {
             guard let self else { return }
 
             var lastCompletedNoteURL: URL?
+            let snapshots = await orchestrator.snapshots()
 
-            while !Task.isCancelled {
-                let snapshot = await orchestrator.snapshot()
+            for await snapshot in snapshots {
+                if Task.isCancelled {
+                    break
+                }
 
                 if case let .completed(noteURL, _) = snapshot.lastOutcome {
                     lastCompletedNoteURL = noteURL
                 }
 
                 await MainActor.run {
-                    self.backgroundProcessingSnapshot = snapshot
+                    if self.backgroundProcessingSnapshot != snapshot {
+                        self.backgroundProcessingSnapshot = snapshot
+                    }
                     if self.lastBackgroundProcessedNoteURL != lastCompletedNoteURL {
                         self.lastBackgroundProcessedNoteURL = lastCompletedNoteURL
                     }
                 }
-
-                try? await Task.sleep(nanoseconds: 200_000_000)
             }
         }
     }

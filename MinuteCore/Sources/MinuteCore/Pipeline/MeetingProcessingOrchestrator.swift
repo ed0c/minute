@@ -24,9 +24,13 @@ public actor MeetingProcessingOrchestrator {
     private var lastOutcome: BackgroundProcessingOutcome?
 
     private var activeTask: Task<Void, Never>?
+    private var snapshotObservers: [UUID: AsyncStream<BackgroundProcessingSnapshot>.Continuation] = [:]
 
     deinit {
         activeTask?.cancel()
+        for continuation in snapshotObservers.values {
+            continuation.finish()
+        }
     }
 
     public init(
@@ -49,21 +53,33 @@ public actor MeetingProcessingOrchestrator {
     }
 
     public func snapshot() -> BackgroundProcessingSnapshot {
-        BackgroundProcessingSnapshot(
-            activeMeetingID: activeMeetingID,
-            activeStage: activeStage,
-            activeProgress: activeProgress,
-            pendingMeetingID: pending?.meetingID,
-            lastOutcome: lastOutcome
-        )
+        currentSnapshot()
+    }
+
+    public func snapshots() -> AsyncStream<BackgroundProcessingSnapshot> {
+        let observerID = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            Task { [weak self] in
+                await self?.addSnapshotObserver(id: observerID, continuation: continuation)
+            }
+            continuation.onTermination = { [weak self] _ in
+                Task {
+                    await self?.removeSnapshotObserver(id: observerID)
+                }
+            }
+        }
     }
 
     public func cancelActiveProcessing(clearPending: Bool) {
+        let shouldBroadcast = clearPending && pending != nil
         if clearPending {
             pending = nil
         }
 
         activeTask?.cancel()
+        if shouldBroadcast {
+            broadcastSnapshot()
+        }
     }
 
     @discardableResult
@@ -87,6 +103,7 @@ public actor MeetingProcessingOrchestrator {
 
         if pending == nil {
             pending = candidate
+            broadcastSnapshot()
             return true
         }
 
@@ -110,6 +127,7 @@ public actor MeetingProcessingOrchestrator {
 
         if pending == nil {
             pending = (meetingID: meetingID, context: context)
+            broadcastSnapshot()
             return true
         }
 
@@ -126,6 +144,7 @@ public actor MeetingProcessingOrchestrator {
         activeStage = nil
         activeProgress = nil
         lastOutcome = nil
+        broadcastSnapshot()
 
         let token = await busyGate.beginBusyScope()
         let executePipeline = executePipeline
@@ -156,8 +175,12 @@ public actor MeetingProcessingOrchestrator {
     }
 
     private func updateProgress(_ progress: PipelineProgress) {
+        let hasChanged = activeStage != progress.stage || activeProgress != progress.fractionCompleted
         activeStage = progress.stage
         activeProgress = progress.fractionCompleted
+        if hasChanged {
+            broadcastSnapshot()
+        }
     }
 
     private func finishActive(meetingID: UUID, context: PipelineContext, outcome: BackgroundProcessingOutcome) async {
@@ -175,10 +198,40 @@ public actor MeetingProcessingOrchestrator {
         activeStage = nil
         activeProgress = nil
         activeTask = nil
+        broadcastSnapshot()
 
         if let next = pending {
             pending = nil
             await startProcessing(meetingID: next.meetingID, context: next.context)
+        }
+    }
+
+    private func addSnapshotObserver(
+        id: UUID,
+        continuation: AsyncStream<BackgroundProcessingSnapshot>.Continuation
+    ) {
+        snapshotObservers[id] = continuation
+        continuation.yield(currentSnapshot())
+    }
+
+    private func removeSnapshotObserver(id: UUID) {
+        snapshotObservers.removeValue(forKey: id)
+    }
+
+    private func currentSnapshot() -> BackgroundProcessingSnapshot {
+        BackgroundProcessingSnapshot(
+            activeMeetingID: activeMeetingID,
+            activeStage: activeStage,
+            activeProgress: activeProgress,
+            pendingMeetingID: pending?.meetingID,
+            lastOutcome: lastOutcome
+        )
+    }
+
+    private func broadcastSnapshot() {
+        let snapshot = currentSnapshot()
+        for continuation in snapshotObservers.values {
+            continuation.yield(snapshot)
         }
     }
 }
