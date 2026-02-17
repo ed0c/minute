@@ -1,7 +1,7 @@
 import Foundation
-import MinuteCore
 import Testing
 @testable import Minute
+@testable import MinuteCore
 
 struct MeetingPipelineViewModelCancelSessionTests {
     @Test
@@ -170,6 +170,96 @@ struct MeetingPipelineViewModelCancelSessionTests {
         }
 
         await MainActor.run {
+            model = nil
+        }
+    }
+
+    @Test
+    func changingScreenContextSelectionWhileRecording_restartsCaptureSession() async throws {
+        let captureService = ScreenContextCaptureService(inferencer: MockScreenContextInferenceService())
+        let seededSource = ScreenContextCaptureSource(
+            windowTitle: "Seeded Window",
+            captureImageData: {
+                Data([0x01, 0x02, 0x03, 0x04])
+            }
+        )
+        try await captureService._testStartCapture(
+            sources: [seededSource],
+            minimumFrameInterval: 1.0
+        )
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+
+        let audioService = TestAudioService()
+
+        let suiteName = "MeetingPipelineViewModelScreenContextSelectionSwitchTests"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+        stagePreferencesStore.clear()
+
+        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
+
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: summarizationServiceProvider,
+            modelManager: MockModelManager(),
+            vaultAccess: coordinatorVaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        var model: MeetingPipelineViewModel? = await MainActor.run {
+            MeetingPipelineViewModel(
+                audioService: audioService,
+                mediaImportService: MockMediaImportService(),
+                recoveryService: MockRecordingRecoveryService(),
+                pipelineCoordinator: coordinator,
+                screenContextCaptureService: captureService,
+                screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+                screenContextSettingsStore: ScreenContextSettingsStore(),
+                vaultAccess: viewModelVaultAccess,
+                recordingPermissions: .alwaysGranted(),
+                stagePreferencesStore: stagePreferencesStore
+            )
+        }
+
+        await MainActor.run {
+            model?.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                if case .recording = model.state {
+                    return true
+                }
+                return false
+            }
+        }
+
+        await MainActor.run {
+            model?.setScreenCaptureEnabled(true)
+            model?.setScreenCaptureSelection(
+                ScreenContextWindowSelection(
+                    bundleIdentifier: "com.example.switch",
+                    applicationName: "Switch App",
+                    windowTitle: "Switch Window"
+                )
+            )
+        }
+
+        try await eventually(timeoutNanoseconds: 2_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                return (model.screenInferenceStatus?.processedCount ?? 0) > 0
+            }
+        }
+
+        await MainActor.run {
+            model?.send(.cancelRecording)
             model = nil
         }
     }

@@ -1183,6 +1183,8 @@ final class MeetingPipelineViewModel: ObservableObject {
         selection: ScreenContextWindowSelection,
         offsetSeconds: TimeInterval
     ) async {
+        _ = await stopScreenContextCaptureAndAppend()
+        await clearScreenContextAutoStopWarning()
         await startScreenContextCaptureIfNeeded(selection: selection, offsetSeconds: offsetSeconds)
     }
 
