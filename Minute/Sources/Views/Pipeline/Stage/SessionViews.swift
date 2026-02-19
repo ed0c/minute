@@ -31,6 +31,7 @@ struct RecordingSessionCardView: View {
     let onUploadTap: () -> Void
 
     @State private var isScreenContextPopoverPresented = false
+    @State private var isVocabularyPopoverPresented = false
 
     private var microphoneBinding: Binding<Bool> {
         Binding(
@@ -46,13 +47,31 @@ struct RecordingSessionCardView: View {
         )
     }
 
+    private var vocabularyModeBinding: Binding<VocabularyBoostingSessionMode> {
+        Binding(
+            get: { model.sessionVocabularyMode },
+            set: { model.setSessionVocabularyMode($0) }
+        )
+    }
+
+    private var customVocabularyInputBinding: Binding<String> {
+        Binding(
+            get: { model.sessionCustomVocabularyInput },
+            set: { model.setSessionCustomVocabularyInput($0) }
+        )
+    }
+
     private var isRecording: Bool {
         if case .recording = model.state { return true }
         return false
     }
 
+    private var isStopping: Bool {
+        model.captureState == .stopping
+    }
+
     private var isListening: Bool {
-        isRecording && (model.microphoneCaptureEnabled || model.systemAudioCaptureEnabled)
+        !isStopping && isRecording && (model.microphoneCaptureEnabled || model.systemAudioCaptureEnabled)
     }
 
     private var topInset: CGFloat {
@@ -69,7 +88,15 @@ struct RecordingSessionCardView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
 
-                        if isRecording {
+                        if isStopping {
+                            Text("Stopping session")
+                                .font(.system(size: 20, weight: .semibold))
+                                .tracking(-0.4)
+                                .foregroundStyle(Color.minuteTextPrimary)
+                            Text("Finalizing audio capture...")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color.minuteTextSecondary)
+                        } else if isRecording {
                             Text("Session in progress")
                                 .font(.system(size: 20, weight: .semibold))
                                 .tracking(-0.4)
@@ -236,6 +263,44 @@ struct RecordingSessionCardView: View {
                             .accessibilityValue(Text(model.screenCaptureSelectionDisplayText ?? "None"))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if model.isFluidAudioBackendSelected {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Vocabulary")
+                            .minuteFootnote()
+                            .textCase(.uppercase)
+
+                        HStack(alignment: .center, spacing: 12) {
+                            Picker("Vocabulary", selection: vocabularyModeBinding) {
+                                ForEach(model.sessionVocabularyModes) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityLabel(Text("Session vocabulary mode"))
+
+                            if model.sessionVocabularyMode == .custom {
+                                Button("Edit Terms") {
+                                    isVocabularyPopoverPresented = true
+                                }
+                                .buttonStyle(.bordered)
+                                .popover(isPresented: $isVocabularyPopoverPresented, arrowEdge: .bottom) {
+                                    SessionVocabularyPopover(termsInput: customVocabularyInputBinding)
+                                }
+                            }
+                        }
+
+                        Text(model.sessionVocabularyHintText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.minuteTextSecondary)
+
+                        if let message = model.sessionVocabularyWarningMessage, !message.isEmpty {
+                            Text(message)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                        }
+                    }
                 }
             }
 

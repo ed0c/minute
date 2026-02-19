@@ -19,6 +19,10 @@ struct ModelsSettingsSection: View {
                         models: model.fluidAudioModels,
                         selection: $model.selectedFluidAudioModelID
                     )
+
+                    Divider()
+
+                    VocabularyBoostingSection(model: model)
                 } else {
                     TranscriptionModelPicker(
                         models: model.transcriptionModels,

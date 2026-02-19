@@ -126,6 +126,29 @@ public protocol TranscriptionServicing: Sendable {
     func transcribe(wavURL: URL) async throws -> TranscriptionResult
 }
 
+public struct TranscriptionVocabularySettings: Sendable, Equatable {
+    public var mode: VocabularyBoostingSessionMode
+    public var terms: [String]
+    public var strength: VocabularyBoostingStrength?
+
+    public init(
+        mode: VocabularyBoostingSessionMode,
+        terms: [String],
+        strength: VocabularyBoostingStrength?
+    ) {
+        self.mode = mode
+        self.terms = VocabularyTermEntry.normalizeDisplayTerms(terms)
+        self.strength = strength
+    }
+}
+
+public protocol VocabularyBoostingTranscriptionServicing: TranscriptionServicing {
+    func transcribe(
+        wavURL: URL,
+        vocabulary: TranscriptionVocabularySettings?
+    ) async throws -> TranscriptionResult
+}
+
 public protocol DiarizationServicing: Sendable {
     func diarize(wavURL: URL, embeddingExportURL: URL?) async throws -> [SpeakerSegment]
 }
@@ -210,4 +233,19 @@ public protocol ModelManaging: Sendable {
     func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws
     func validateModels() async throws -> ModelValidationResult
     func removeModels(withIDs ids: [String]) async throws
+}
+
+public protocol VocabularyBoostingSettingsStoring: Sendable {
+    func load() -> GlobalVocabularyBoostingSettings
+    func save(_ settings: GlobalVocabularyBoostingSettings)
+    func clear()
+}
+
+public protocol SessionVocabularyResolving: Sendable {
+    func resolve(
+        globalSettings: GlobalVocabularyBoostingSettings,
+        sessionMode: VocabularyBoostingSessionMode,
+        sessionCustomInput: String,
+        readiness: VocabularyReadinessStatus
+    ) -> SessionVocabularyResolution
 }

@@ -27,6 +27,15 @@ struct AppConfigurationTests {
             configuration.micActivityNotificationsEnabled,
             AppConfiguration.Defaults.defaultMicActivityNotificationsEnabled
         )
+        expectEqual(
+            configuration.vocabularyBoostingEnabled,
+            AppConfiguration.Defaults.defaultVocabularyBoostingEnabled
+        )
+        expectEqual(configuration.vocabularyBoostingTerms, [])
+        expectEqual(
+            configuration.vocabularyBoostingStrength,
+            AppConfiguration.Defaults.defaultVocabularyBoostingStrength
+        )
     }
 
     @Test
@@ -74,6 +83,20 @@ struct AppConfigurationTests {
         let configuration = AppConfiguration(defaults: defaults)
 
         expectEqual(configuration.normalizeAnalysisAudio, false)
+    }
+
+    @Test
+    func defaults_readsVocabularyBoostingSettings() {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: AppConfiguration.Defaults.vocabularyBoostingEnabledKey)
+        defaults.set(["  Acme  ", "ACME", "Roadmap"], forKey: AppConfiguration.Defaults.vocabularyBoostingTermsKey)
+        defaults.set(VocabularyBoostingStrength.aggressive.rawValue, forKey: AppConfiguration.Defaults.vocabularyBoostingStrengthKey)
+
+        let configuration = AppConfiguration(defaults: defaults)
+
+        expectEqual(configuration.vocabularyBoostingEnabled, true)
+        expectEqual(configuration.vocabularyBoostingTerms, ["Acme", "Roadmap"])
+        expectEqual(configuration.vocabularyBoostingStrength, .aggressive)
     }
 
     private func makeDefaults() -> UserDefaults {

@@ -2,6 +2,14 @@ import CryptoKit
 import Foundation
 import os
 
+public protocol FluidAudioModelManaging: Sendable {
+    func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws
+    func validateModels() async throws -> ModelValidationResult
+    func removeModels(withIDs ids: [String]) async throws
+}
+
+extension FluidAudioASRModelManager: FluidAudioModelManaging {}
+
 /// Downloads and verifies required local model files under Application Support.
 ///<
 /// Networking must only be used for model downloads.
@@ -37,7 +45,7 @@ public actor DefaultModelManager: ModelManaging {
     private let selectionStore: SummarizationModelSelectionStore
     private let transcriptionSelectionStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
-    private let fluidAudioModelManager: FluidAudioASRModelManager
+    private let fluidAudioModelManager: any FluidAudioModelManaging
     private let logger = Logger(subsystem: "roblibob.Minute", category: "models")
 
     public init(
@@ -45,13 +53,14 @@ public actor DefaultModelManager: ModelManaging {
         selectionStore: SummarizationModelSelectionStore = SummarizationModelSelectionStore(),
         transcriptionSelectionStore: TranscriptionModelSelectionStore = TranscriptionModelSelectionStore(),
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
-        fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore()
+        fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore(),
+        fluidAudioModelManager: (any FluidAudioModelManaging)? = nil
     ) {
         self.requiredModelsOverride = requiredModels
         self.selectionStore = selectionStore
         self.transcriptionSelectionStore = transcriptionSelectionStore
         self.transcriptionBackendStore = transcriptionBackendStore
-        self.fluidAudioModelManager = FluidAudioASRModelManager(selectionStore: fluidAudioModelStore)
+        self.fluidAudioModelManager = fluidAudioModelManager ?? FluidAudioASRModelManager(selectionStore: fluidAudioModelStore)
     }
 
     public func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)? = nil) async throws {
@@ -205,12 +214,14 @@ public actor DefaultModelManager: ModelManaging {
     }
 
     public func removeModels(withIDs ids: [String]) async throws {
-        let fluidAudioIDs = ids.filter { FluidAudioASRModelCatalog.model(for: $0) != nil }
+        let fluidAudioIDs = ids.filter {
+            FluidAudioASRModelCatalog.model(for: $0) != nil || $0.hasSuffix("-ctc-vocab")
+        }
         if !fluidAudioIDs.isEmpty {
             try await fluidAudioModelManager.removeModels(withIDs: fluidAudioIDs)
         }
 
-        let remainingIDs = ids.filter { FluidAudioASRModelCatalog.model(for: $0) == nil }
+        let remainingIDs = ids.filter { !fluidAudioIDs.contains($0) }
         guard !remainingIDs.isEmpty else { return }
 
         let requiredModels = resolvedRequiredModels()

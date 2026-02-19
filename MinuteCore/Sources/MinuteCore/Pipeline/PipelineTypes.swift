@@ -61,6 +61,7 @@ public struct PipelineContext: Sendable {
     public var normalizeAnalysisAudio: Bool
     public var screenContextEvents: [ScreenContextEvent]
     public var transcriptionOverride: TranscriptionResult?
+    public var transcriptionVocabulary: TranscriptionVocabularySettings?
     public var meetingType: MeetingType
     public var languageProcessing: LanguageProcessingProfile
     public var outputLanguage: OutputLanguage
@@ -79,6 +80,7 @@ public struct PipelineContext: Sendable {
         normalizeAnalysisAudio: Bool = false,
         screenContextEvents: [ScreenContextEvent] = [],
         transcriptionOverride: TranscriptionResult? = nil,
+        transcriptionVocabulary: TranscriptionVocabularySettings? = nil,
         meetingType: MeetingType = .autodetect,
         languageProcessing: LanguageProcessingProfile = .autoToEnglish,
         outputLanguage: OutputLanguage = .defaultSelection,
@@ -96,6 +98,7 @@ public struct PipelineContext: Sendable {
         self.normalizeAnalysisAudio = normalizeAnalysisAudio
         self.screenContextEvents = screenContextEvents
         self.transcriptionOverride = transcriptionOverride
+        self.transcriptionVocabulary = transcriptionVocabulary
         self.meetingType = meetingType
         self.languageProcessing = languageProcessing
         self.outputLanguage = outputLanguage

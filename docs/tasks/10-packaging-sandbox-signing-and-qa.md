@@ -37,6 +37,14 @@ This checklist is required before releasing a build.
 - [ ] Shared-window-closed alert can coexist with silence warning without hiding keep-recording actions.
 - [ ] Dismissing the window-closed alert does not stop recording by itself.
 
+## Manual QA (Vocabulary Boosting)
+
+- [ ] With FluidAudio backend selected, global vocabulary controls (toggle, terms editor, strength selector) are visible in Settings.
+- [ ] With Whisper backend selected, vocabulary controls are hidden/disabled in Settings and session card.
+- [ ] Session card vocabulary row supports `Off`, `Default`, and `Custom`; custom opens term popover.
+- [ ] Custom session terms are additive with global terms; empty custom input falls back to default behavior.
+- [ ] If vocabulary model readiness is missing, session still starts and shows a non-blocking warning that boosting is disabled.
+
 ## Notification Permission Fallback
 
 - [ ] With notification permission denied, silence warning is still visible in-app.

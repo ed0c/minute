@@ -4,6 +4,7 @@ import SwiftUI
 enum RecordButtonState {
     case ready
     case recording
+    case stopping
 }
 
 struct FloatingControlBar: View {
@@ -128,6 +129,8 @@ struct RecordControlButton: View {
             return "Start recording"
         case .recording:
             return "Stop recording"
+        case .stopping:
+            return "Stopping recording"
         }
     }
 
@@ -157,6 +160,14 @@ struct RecordControlButton: View {
                         .frame(width: 58, height: 58)
                         .scaleEffect(isPulsing ? 1.45 : 0.9)
                         .opacity(isPulsing ? 0 : 0.7)
+                case .stopping:
+                    Circle()
+                        .stroke(Color.orange, lineWidth: 4)
+                        .frame(width: 58, height: 58)
+
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.orange)
                 }
             }
             .frame(width: 64, height: 64)

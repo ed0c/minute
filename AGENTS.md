@@ -151,3 +151,8 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
 - Files (Obsidian vault output, app support directories) (001-swift-testing-refactor)
 - Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore (010-silence-auto-stop)
 - Local files only (existing vault outputs and temporary recording session directory), plus session-scoped event history in memory for stop rationale (010-silence-auto-stop)
+- Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components (011-vocabulary-boosting)
+- Local app settings persistence for global vocabulary config + session-scoped in-memory override state; no new vault output files (011-vocabulary-boosting)
+
+## Recent Changes
+- 011-vocabulary-boosting: Added Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components

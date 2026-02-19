@@ -262,6 +262,10 @@ struct PipelineContentView: View {
     }
 
     private var floatingStatusLabel: String {
+        if model.captureState == .stopping {
+            return "Stopping"
+        }
+
         switch model.state {
         case .recording:
             return "Recording"
@@ -280,6 +284,9 @@ struct PipelineContentView: View {
         if recordButtonState == .recording {
             return .red
         }
+        if recordButtonState == .stopping {
+            return .orange
+        }
         if recordButtonEnabled {
             return .green
         }
@@ -290,6 +297,8 @@ struct PipelineContentView: View {
         switch model.captureState {
         case .recording:
             return .recording
+        case .stopping:
+            return .stopping
         case .ready:
             return .ready
         }
@@ -301,6 +310,8 @@ struct PipelineContentView: View {
             return true
         case .recording:
             return true
+        case .stopping:
+            return false
         }
     }
 
@@ -527,6 +538,8 @@ struct PipelineContentView: View {
         case .recording:
             performHaptic(.levelChange)
             model.send(.stopRecording)
+        case .stopping:
+            break
         }
     }
 
