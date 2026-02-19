@@ -24,7 +24,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.1"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "d19ce5a81af0a55d43892df53012e4a2b07c69b1"),
     ],
     targets: [
         // Precompiled whisper.cpp XCFramework (downloaded from ggml-org/whisper.cpp releases).
