@@ -5,6 +5,59 @@ import Testing
 
 struct MeetingPipelineViewModelVocabularyOverrideTests {
     @Test
+    func customInputAutomaticallyTogglesSessionListMode() async throws {
+        let suite = "MeetingPipelineViewModelVocabularyModeFromInput.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+
+        let backendStore = TranscriptionBackendSelectionStore(defaults: defaults, key: "backend")
+        backendStore.setSelectedBackendID(TranscriptionBackend.fluidAudio.rawValue)
+
+        let stageStore = StagePreferencesStore(defaults: defaults)
+        stageStore.clear()
+
+        let vaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let coordinator = await MainActor.run {
+            makeCoordinator(vaultAccess: vaultAccess)
+        }
+
+        let model: MeetingPipelineViewModel? = await MainActor.run {
+            MeetingPipelineViewModel(
+                audioService: MockAudioService(),
+                mediaImportService: MockMediaImportService(),
+                recoveryService: MockRecordingRecoveryService(),
+                pipelineCoordinator: coordinator,
+                screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
+                screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+                screenContextSettingsStore: ScreenContextSettingsStore(),
+                vaultAccess: vaultAccess,
+                recordingPermissions: .alwaysGranted(),
+                stagePreferencesStore: stageStore,
+                transcriptionBackendStore: backendStore,
+                vocabularySettingsStore: MockVocabularyBoostingSettingsStore(
+                    settings: GlobalVocabularyBoostingSettings(
+                        enabled: true,
+                        strength: .balanced,
+                        terms: ["Acme"]
+                    )
+                ),
+                sessionVocabularyResolver: SessionVocabularyResolver(),
+                modelValidationProvider: {
+                    ModelValidationResult(missingModelIDs: [], invalidModelIDs: [])
+                }
+            )
+        }
+
+        await MainActor.run {
+            #expect(model?.sessionVocabularyMode == .default)
+            model?.setSessionCustomVocabularyInput("Taylor")
+            #expect(model?.sessionVocabularyMode == .custom)
+            model?.setSessionCustomVocabularyInput("  \n, ")
+            #expect(model?.sessionVocabularyMode == .default)
+        }
+    }
+
+    @Test
     func customTermsPersistForActiveSession_andResetAfterCancel() async throws {
         let suite = "MeetingPipelineViewModelVocabularyOverrideLifecycle.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

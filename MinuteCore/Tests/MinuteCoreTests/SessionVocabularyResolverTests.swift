@@ -88,4 +88,43 @@ struct SessionVocabularyResolverTests {
         expectEqual(resolved.effectiveMode, .off)
         expectEqual(resolved.effectiveTerms, [])
     }
+
+    @Test
+    func globalDisabled_forcesOffEvenWithCustomInput() {
+        let global = GlobalVocabularyBoostingSettings(
+            enabled: false,
+            strength: .balanced,
+            terms: ["Acme"]
+        )
+
+        let resolved = resolver.resolve(
+            globalSettings: global,
+            sessionMode: .custom,
+            sessionCustomInput: "Taylor",
+            readiness: .ready(backend: .fluidAudio)
+        )
+
+        expectEqual(resolved.effectiveMode, .off)
+        expectEqual(resolved.effectiveTerms, [])
+    }
+
+    @Test
+    func offModeFallsBackToDefaultWhenGlobalEnabled() {
+        let global = GlobalVocabularyBoostingSettings(
+            enabled: true,
+            strength: .balanced,
+            terms: ["Acme"]
+        )
+
+        let resolved = resolver.resolve(
+            globalSettings: global,
+            sessionMode: .off,
+            sessionCustomInput: " ",
+            readiness: .ready(backend: .fluidAudio)
+        )
+
+        expectEqual(resolved.effectiveMode, .default)
+        expectEqual(resolved.effectiveTerms, ["Acme"])
+        expectEqual(resolved.effectiveStrength, .balanced)
+    }
 }

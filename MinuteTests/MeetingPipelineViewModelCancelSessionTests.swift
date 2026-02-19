@@ -424,6 +424,75 @@ struct MeetingPipelineViewModelCancelSessionTests {
             model = nil
         }
     }
+
+    @Test
+    func quietMicrophoneLevel_updatesVisualizerSamples() async throws {
+        let audioService = MeteringAudioService()
+
+        let suiteName = "MeetingPipelineViewModelAudioLevelVisualizerTests"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+        stagePreferencesStore.clear()
+
+        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
+
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: summarizationServiceProvider,
+            modelManager: MockModelManager(),
+            vaultAccess: coordinatorVaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        var model: MeetingPipelineViewModel? = await MainActor.run {
+            MeetingPipelineViewModel(
+                audioService: audioService,
+                mediaImportService: MockMediaImportService(),
+                recoveryService: MockRecordingRecoveryService(),
+                pipelineCoordinator: coordinator,
+                screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
+                screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+                screenContextSettingsStore: ScreenContextSettingsStore(),
+                vaultAccess: viewModelVaultAccess,
+                recordingPermissions: .alwaysGranted(),
+                stagePreferencesStore: stagePreferencesStore
+            )
+        }
+
+        await MainActor.run {
+            model?.send(.startRecording)
+        }
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                if case .recording = model.state {
+                    return true
+                }
+                return false
+            }
+        }
+
+        await audioService.emitLevel(0.02)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        await audioService.emitLevel(0.03)
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                guard let model else { return false }
+                return model.audioLevelSamples.contains { $0 > 0.01 }
+            }
+        }
+
+        await MainActor.run {
+            model?.send(.cancelRecording)
+            model = nil
+        }
+    }
 }
 
 private actor TestAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling {
@@ -506,6 +575,39 @@ private actor SlowStopAudioService: AudioServicing, AudioLevelMetering, AudioCap
 
     func setSystemAudioEnabled(_ enabled: Bool) async {
         _ = enabled
+    }
+}
+
+private actor MeteringAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling {
+    private var levelHandler: (@Sendable (Float) -> Void)?
+
+    func startRecording() async throws {}
+
+    func cancelRecording() async {}
+
+    func stopRecording() async throws -> AudioCaptureResult {
+        throw MinuteError.audioExportFailed
+    }
+
+    func convertToContractWav(inputURL: URL, outputURL: URL) async throws {
+        _ = inputURL
+        _ = outputURL
+    }
+
+    func setLevelHandler(_ handler: (@Sendable (Float) -> Void)?) async {
+        levelHandler = handler
+    }
+
+    func setMicrophoneEnabled(_ enabled: Bool) async {
+        _ = enabled
+    }
+
+    func setSystemAudioEnabled(_ enabled: Bool) async {
+        _ = enabled
+    }
+
+    func emitLevel(_ level: Float) {
+        levelHandler?(level)
     }
 }
 

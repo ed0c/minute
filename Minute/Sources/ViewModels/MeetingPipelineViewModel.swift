@@ -95,6 +95,8 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var sessionVocabularyMode: VocabularyBoostingSessionMode = .default
     @Published private(set) var sessionCustomVocabularyInput: String = ""
     @Published private(set) var sessionVocabularyWarningMessage: String? = nil
+    @Published private(set) var vocabularyBoostingEnabledInSettings: Bool = false
+    @Published private(set) var globalVocabularyTerms: [String] = []
     @Published var meetingType: MeetingType = .autodetect
     @Published var languageProcessing: LanguageProcessingProfile = .autoToEnglish
     @Published var outputLanguage: OutputLanguage = .defaultSelection
@@ -146,11 +148,15 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     var sessionVocabularyHintText: String {
-        "Use for names, acronyms, product terms."
+        "Use for names, acronyms, product terms. Settings terms are included automatically."
     }
 
-    var sessionVocabularyModes: [VocabularyBoostingSessionMode] {
-        VocabularyBoostingSessionMode.allCases
+    var showsSessionVocabularyPopoverButton: Bool {
+        isFluidAudioBackendSelected && vocabularyBoostingEnabledInSettings
+    }
+
+    var sessionVocabularyListLabel: String {
+        sessionVocabularyMode == .custom ? "Custom" : "Default"
     }
 
     private let audioService: any AudioServicing
@@ -238,6 +244,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         refreshVaultStatus()
         refreshOutputLanguageSetting()
         refreshTranscriptionBackendSetting()
+        refreshVocabularySettings()
         refreshMicrophonePermission()
         refreshScreenRecordingPermission()
 
@@ -247,6 +254,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                 self?.refreshVaultStatus()
                 self?.refreshOutputLanguageSetting()
                 self?.refreshTranscriptionBackendSetting()
+                self?.refreshVocabularySettings()
             }
 
         startStagePreferencesObservation()
@@ -439,10 +447,24 @@ final class MeetingPipelineViewModel: ObservableObject {
             sessionVocabularyWarningMessage = nil
             sessionVocabularyReadiness = .unsupported(backend: transcriptionBackend)
         }
+        syncSessionVocabularyModeWithCurrentInput()
+    }
+
+    func refreshVocabularySettings() {
+        let settings = vocabularySettingsStore.load()
+        vocabularyBoostingEnabledInSettings = settings.enabled
+        globalVocabularyTerms = settings.terms
+        syncSessionVocabularyModeWithCurrentInput(using: settings)
     }
 
     func setSessionVocabularyMode(_ mode: VocabularyBoostingSessionMode) {
-        sessionVocabularyMode = mode
+        if mode == .custom {
+            sessionVocabularyMode = .custom
+            return
+        }
+
+        sessionCustomVocabularyInput = ""
+        syncSessionVocabularyModeWithCurrentInput()
         if mode == .off {
             sessionVocabularyWarningMessage = nil
         }
@@ -450,6 +472,7 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     func setSessionCustomVocabularyInput(_ input: String) {
         sessionCustomVocabularyInput = input
+        syncSessionVocabularyModeWithCurrentInput()
     }
 
     func refreshRecoverableRecordings() {
@@ -1410,12 +1433,14 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
 
         let globalVocabularySettings = vocabularySettingsStore.load()
+        syncSessionVocabularyModeWithCurrentInput(using: globalVocabularySettings)
         let vocabularyResolution = sessionVocabularyResolver.resolve(
             globalSettings: globalVocabularySettings,
             sessionMode: sessionVocabularyMode,
             sessionCustomInput: sessionCustomVocabularyInput,
             readiness: sessionVocabularyReadiness
         )
+        sessionVocabularyMode = vocabularyResolution.effectiveMode
         if vocabularyResolution.warningMessage != nil {
             sessionVocabularyWarningMessage = vocabularyResolution.warningMessage
         }
@@ -1471,10 +1496,27 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     private func resetSessionVocabularyOverride() {
-        sessionVocabularyMode = .default
         sessionCustomVocabularyInput = ""
         sessionVocabularyWarningMessage = nil
         sessionVocabularyReadiness = .unsupported(backend: transcriptionBackend)
+        syncSessionVocabularyModeWithCurrentInput()
+    }
+
+    private func syncSessionVocabularyModeWithCurrentInput(
+        using settings: GlobalVocabularyBoostingSettings? = nil
+    ) {
+        let resolvedSettings = settings ?? vocabularySettingsStore.load()
+        let hasCustomTerms = !VocabularyTermEntry.parseFromEditorInput(
+            sessionCustomVocabularyInput,
+            source: .sessionCustom
+        ).isEmpty
+
+        guard transcriptionBackend == .fluidAudio, resolvedSettings.enabled else {
+            sessionVocabularyMode = .off
+            return
+        }
+
+        sessionVocabularyMode = hasCustomTerms ? .custom : .default
     }
 
 
@@ -1509,9 +1551,13 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
 
         let clamped = min(max(level, 0), 1)
-        let quantized = (clamped * 8).rounded() / 8
+        // Keep quiet microphone signal visible without affecting silence auto-stop logic.
+        let visualTarget = min(max(powf(clamped, 0.55), 0), 1)
+        let previous = Float(audioLevelSamples.last ?? 0)
+        let smoothing: Float = visualTarget > previous ? 0.55 : 0.22
+        let smoothed = previous + (visualTarget - previous) * smoothing
         audioLevelSamples.removeFirst()
-        audioLevelSamples.append(CGFloat(quantized))
+        audioLevelSamples.append(CGFloat(smoothed))
 
         if case .recording = state {
             let silenceController = silenceController

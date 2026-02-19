@@ -243,30 +243,39 @@ public actor DefaultAudioService: AudioServicing, AudioLevelMetering, AudioCaptu
     private static func level(for buffer: AVAudioPCMBuffer) -> Float {
         let frameLength = Int(buffer.frameLength)
         guard frameLength > 0 else { return 0 }
+        let channelCount = max(Int(buffer.format.channelCount), 1)
 
         if let channelData = buffer.floatChannelData {
-            let channel = channelData[0]
-            var sum: Float = 0
-            for index in 0..<frameLength {
-                let sample = channel[index]
-                sum += sample * sample
+            var peakRMS: Float = 0
+            for channelIndex in 0..<channelCount {
+                let channel = channelData[channelIndex]
+                var sum: Float = 0
+                for index in 0..<frameLength {
+                    let sample = channel[index]
+                    sum += sample * sample
+                }
+                let rms = sqrt(sum / Float(frameLength))
+                peakRMS = max(peakRMS, rms)
             }
 
-            let rms = sqrt(sum / Float(frameLength))
-            return min(max(rms * 4, 0), 1)
+            return min(max(peakRMS * 4, 0), 1)
         }
 
         if let channelData = buffer.int16ChannelData {
-            let channel = channelData[0]
             let scale = 1.0 / Float(Int16.max)
-            var sum: Float = 0
-            for index in 0..<frameLength {
-                let sample = Float(channel[index]) * scale
-                sum += sample * sample
+            var peakRMS: Float = 0
+            for channelIndex in 0..<channelCount {
+                let channel = channelData[channelIndex]
+                var sum: Float = 0
+                for index in 0..<frameLength {
+                    let sample = Float(channel[index]) * scale
+                    sum += sample * sample
+                }
+                let rms = sqrt(sum / Float(frameLength))
+                peakRMS = max(peakRMS, rms)
             }
 
-            let rms = sqrt(sum / Float(frameLength))
-            return min(max(rms * 4, 0), 1)
+            return min(max(peakRMS * 4, 0), 1)
         }
 
         return 0

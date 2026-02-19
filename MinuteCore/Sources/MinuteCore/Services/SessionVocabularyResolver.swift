@@ -59,42 +59,34 @@ public struct SessionVocabularyResolver: SessionVocabularyResolving {
             )
         }
 
-        let globalTerms = globalSettings.enabled ? globalSettings.terms : []
-        let customTerms = VocabularyTermEntry.parseFromEditorInput(sessionCustomInput, source: .sessionCustom)
-            .map(\.displayText)
-
-        switch sessionMode {
-        case .off:
+        guard globalSettings.enabled else {
             return SessionVocabularyResolution(
-                requestedMode: .off,
+                requestedMode: sessionMode,
                 effectiveMode: .off,
                 effectiveTerms: [],
                 effectiveStrength: nil
             )
-        case .default:
+        }
+
+        let globalTerms = globalSettings.terms
+        let customTerms = VocabularyTermEntry.parseFromEditorInput(sessionCustomInput, source: .sessionCustom)
+            .map(\.displayText)
+
+        if customTerms.isEmpty {
             return SessionVocabularyResolution(
-                requestedMode: .default,
+                requestedMode: sessionMode,
                 effectiveMode: .default,
                 effectiveTerms: globalTerms,
-                effectiveStrength: globalSettings.enabled ? globalSettings.strength : nil
-            )
-        case .custom:
-            if customTerms.isEmpty {
-                return SessionVocabularyResolution(
-                    requestedMode: .custom,
-                    effectiveMode: .default,
-                    effectiveTerms: globalTerms,
-                    effectiveStrength: globalSettings.enabled ? globalSettings.strength : nil
-                )
-            }
-
-            let merged = VocabularyTermEntry.normalizeDisplayTerms(globalTerms + customTerms)
-            return SessionVocabularyResolution(
-                requestedMode: .custom,
-                effectiveMode: .custom,
-                effectiveTerms: merged,
                 effectiveStrength: globalSettings.strength
             )
         }
+
+        let merged = VocabularyTermEntry.normalizeDisplayTerms(globalTerms + customTerms)
+        return SessionVocabularyResolution(
+            requestedMode: sessionMode,
+            effectiveMode: .custom,
+            effectiveTerms: merged,
+            effectiveStrength: globalSettings.strength
+        )
     }
 }
