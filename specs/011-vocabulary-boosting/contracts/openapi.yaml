@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: Minute Vocabulary Boosting Contract
+  version: 0.1.0
+  description: |
+    Planning-time contract for vocabulary boosting configuration and per-session overrides.
+    This contract models app-level boundaries for deterministic behavior and testing.
+servers:
+  - url: local://minute
+paths:
+  /v1/settings/vocabulary-boosting:
+    get:
+      summary: Get global vocabulary boosting settings
+      operationId: getVocabularyBoostingSettings
+      responses:
+        '200':
+          description: Current global vocabulary settings and readiness status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalVocabularyResponse'
+    put:
+      summary: Update global vocabulary boosting settings
+      operationId: updateVocabularyBoostingSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlobalVocabularyUpdateRequest'
+      responses:
+        '200':
+          description: Updated global vocabulary settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalVocabularyResponse'
+        '422':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /v1/sessions/{sessionId}/vocabulary:
+    get:
+      summary: Get session vocabulary override
+      operationId: getSessionVocabularyOverride
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Session vocabulary configuration and effective mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionVocabularyResponse'
+        '404':
+          description: Session not found
+    put:
+      summary: Set session vocabulary override
+      operationId: setSessionVocabularyOverride
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionVocabularyUpdateRequest'
+      responses:
+        '200':
+          description: Session override accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionVocabularyResponse'
+        '422':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    BackendType:
+      type: string
+      enum: [fluidAudio, whisper]
+
+    VocabularyStrength:
+      type: string
+      enum: [gentle, balanced, aggressive]
+
+    VocabularyReadinessState:
+      type: string
+      enum: [ready, missing_models]
+
+    SessionVocabularyMode:
+      type: string
+      enum: [off, default, custom]
+
+    VocabularyTermList:
+      type: array
+      items:
+        type: string
+        minLength: 1
+      description: |
+        Comma/newline user input expanded into a normalized term list:
+        trim whitespace, remove blanks, dedupe case-insensitively, preserve first-entered order/casing.
+
+    VocabularyReadiness:
+      type: object
+      required: [backend, isSupported, state]
+      properties:
+        backend:
+          $ref: '#/components/schemas/BackendType'
+        isSupported:
+          type: boolean
+        state:
+          $ref: '#/components/schemas/VocabularyReadinessState'
+        message:
+          type: string
+
+    GlobalVocabularySettings:
+      type: object
+      required: [enabled, strength, terms]
+      properties:
+        enabled:
+          type: boolean
+        strength:
+          $ref: '#/components/schemas/VocabularyStrength'
+        terms:
+          $ref: '#/components/schemas/VocabularyTermList'
+
+    GlobalVocabularyUpdateRequest:
+      type: object
+      required: [enabled, strength, terms]
+      properties:
+        enabled:
+          type: boolean
+        strength:
+          $ref: '#/components/schemas/VocabularyStrength'
+        terms:
+          type: string
+          description: Raw comma/newline input from editor.
+
+    GlobalVocabularyResponse:
+      type: object
+      required: [settings, readiness]
+      properties:
+        settings:
+          $ref: '#/components/schemas/GlobalVocabularySettings'
+        readiness:
+          $ref: '#/components/schemas/VocabularyReadiness'
+
+    SessionVocabularyUpdateRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          $ref: '#/components/schemas/SessionVocabularyMode'
+        customTerms:
+          type: string
+          description: Raw comma/newline input for custom session terms.
+
+    SessionVocabularyResponse:
+      type: object
+      required: [sessionId, mode, effectiveMode, effectiveTerms, warning]
+      properties:
+        sessionId:
+          type: string
+        mode:
+          $ref: '#/components/schemas/SessionVocabularyMode'
+        effectiveMode:
+          type: string
+          enum: [off, default, custom]
+          description: |
+            If mode=custom and normalized custom terms are empty, effectiveMode resolves to default.
+        effectiveTerms:
+          $ref: '#/components/schemas/VocabularyTermList'
+        warning:
+          type: string
+          description: |
+            Non-empty when session starts while readiness state is missing_models;
+            session may proceed with vocabulary boosting disabled.
+
+    ValidationError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [invalid_mode, invalid_strength, invalid_terms, unsupported_backend]
+        message:
+          type: string

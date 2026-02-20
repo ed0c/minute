@@ -69,6 +69,31 @@ struct OutputContractCoverageTests {
         let transcriptRelativePathsAfterFrontmatter = filesAfterFrontmatter.filter { $0.contains("/_transcripts/") }
         #expect(transcriptRelativePathsAfterFrontmatter == transcriptRelativePaths)
     }
+
+    @Test
+    func vocabularyBoostingContext_stillProducesOnlyThreeVaultFiles() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            summarizationJSON: validExtractionJSON(title: "Vocabulary Session", date: "2025-01-13"),
+            repairJSON: validExtractionJSON(title: "Vocabulary Session", date: "2025-01-13")
+        )
+
+        var context = try makePipelineContext(saveAudio: true, saveTranscript: true)
+        context.transcriptionVocabulary = TranscriptionVocabularySettings(
+            mode: .custom,
+            terms: ["Apollo", "Q4"],
+            strength: .balanced
+        )
+
+        let result = try await coordinator.execute(context: context)
+        #expect(FileManager.default.fileExists(atPath: result.noteURL.path))
+
+        let files = try vaultFileRelativePaths(under: vaultRootURL)
+        #expect(files.count == 3)
+    }
 }
 
 private struct TestModelManager: ModelManaging {

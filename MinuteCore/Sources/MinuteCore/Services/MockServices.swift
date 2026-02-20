@@ -224,6 +224,51 @@ public struct MockModelManager: ModelManaging {
     }
 }
 
+public final class MockVocabularyBoostingSettingsStore: VocabularyBoostingSettingsStoring, @unchecked Sendable {
+    private var settings: GlobalVocabularyBoostingSettings
+
+    public init(settings: GlobalVocabularyBoostingSettings = .default) {
+        self.settings = settings
+    }
+
+    public func load() -> GlobalVocabularyBoostingSettings {
+        settings
+    }
+
+    public func save(_ settings: GlobalVocabularyBoostingSettings) {
+        self.settings = settings
+    }
+
+    public func clear() {
+        settings = .default
+    }
+}
+
+public struct MockSessionVocabularyResolver: SessionVocabularyResolving {
+    public var next: SessionVocabularyResolution?
+
+    public init(next: SessionVocabularyResolution? = nil) {
+        self.next = next
+    }
+
+    public func resolve(
+        globalSettings: GlobalVocabularyBoostingSettings,
+        sessionMode: VocabularyBoostingSessionMode,
+        sessionCustomInput: String,
+        readiness: VocabularyReadinessStatus
+    ) -> SessionVocabularyResolution {
+        if let next {
+            return next
+        }
+        return SessionVocabularyResolver().resolve(
+            globalSettings: globalSettings,
+            sessionMode: sessionMode,
+            sessionCustomInput: sessionCustomInput,
+            readiness: readiness
+        )
+    }
+}
+
 public actor MockSilenceAutoStopController: SilenceAutoStopControlling {
     public private(set) var snapshot = SilenceStatusSnapshot()
 

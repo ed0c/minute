@@ -5,16 +5,23 @@ import os
 public struct FluidAudioTranscriptionConfiguration: Sendable, Equatable {
     public var modelVersionKey: String
     public var audioSource: AudioSource
+    public var defaultVocabulary: TranscriptionVocabularySettings?
 
-    public init(modelVersionKey: String, audioSource: AudioSource = .system) {
+    public init(
+        modelVersionKey: String,
+        audioSource: AudioSource = .system,
+        defaultVocabulary: TranscriptionVocabularySettings? = nil
+    ) {
         self.modelVersionKey = modelVersionKey
         self.audioSource = audioSource
+        self.defaultVocabulary = defaultVocabulary
     }
 }
 
-public struct FluidAudioTranscriptionService: TranscriptionServicing {
+public struct FluidAudioTranscriptionService: VocabularyBoostingTranscriptionServicing {
     private let configuration: FluidAudioTranscriptionConfiguration
     private let logger = Logger(subsystem: "roblibob.Minute", category: "fluidaudio.asr")
+    private static let ctcVocabularyVariant: CtcModelVariant = .ctc110m
 
     public init(configuration: FluidAudioTranscriptionConfiguration) {
         self.configuration = configuration
@@ -32,15 +39,33 @@ public struct FluidAudioTranscriptionService: TranscriptionServicing {
     }
 
     public func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        try await transcribe(wavURL: wavURL, vocabulary: configuration.defaultVocabulary)
+    }
+
+    public func transcribe(
+        wavURL: URL,
+        vocabulary: TranscriptionVocabularySettings?
+    ) async throws -> TranscriptionResult {
         try Task.checkCancellation()
 
+        let resolvedVocabulary = vocabulary ?? configuration.defaultVocabulary
         let version = FluidAudioASRVersionResolver.version(for: configuration.modelVersionKey)
         let models = try await FluidAudioASRModelCache.shared.models(version: version)
         let duration = (try? ContractWavVerifier.durationSeconds(ofContractWavAt: wavURL)) ?? 0
         logger.debug("FluidAudio ASR starting: version=\(configuration.modelVersionKey, privacy: .public) duration=\(String(format: "%.2f", duration), privacy: .public)s")
+        if let resolvedVocabulary, !resolvedVocabulary.terms.isEmpty {
+            let strengthLabel = resolvedVocabulary.strength?.rawValue ?? "none"
+            logger.debug(
+                "FluidAudio ASR vocabulary requested: mode=\(resolvedVocabulary.mode.rawValue, privacy: .public) terms=\(resolvedVocabulary.terms.count, privacy: .public) strength=\(strengthLabel, privacy: .public)"
+            )
+        }
 
         let manager = AsrManager(config: .default)
         try await manager.initialize(models: models)
+        await configureVocabularyBoostingIfAvailable(
+            manager: manager,
+            vocabulary: resolvedVocabulary
+        )
 
         do {
             let converter = AudioConverter()
@@ -74,6 +99,60 @@ public struct FluidAudioTranscriptionService: TranscriptionServicing {
 }
 
 private extension FluidAudioTranscriptionService {
+    func configureVocabularyBoostingIfAvailable(
+        manager: AsrManager,
+        vocabulary: TranscriptionVocabularySettings?
+    ) async {
+        guard let vocabulary = vocabularyContext(from: vocabulary) else {
+            manager.disableVocabularyBoosting()
+            return
+        }
+
+        do {
+            let ctcModels = try await FluidAudioCTCModelCache.shared.models(
+                variant: Self.ctcVocabularyVariant
+            )
+            try await manager.configureVocabularyBoosting(
+                vocabulary: vocabulary.context,
+                ctcModels: ctcModels,
+                config: vocabulary.config
+            )
+            logger.debug(
+                "FluidAudio ASR vocabulary boosting configured: terms=\(vocabulary.context.terms.count, privacy: .public) strength=\(vocabulary.strengthLabel, privacy: .public)"
+            )
+        } catch {
+            manager.disableVocabularyBoosting()
+            logger.warning(
+                "FluidAudio ASR vocabulary boosting unavailable; proceeding without boost: \(ErrorHandler.debugMessage(for: error), privacy: .public)"
+            )
+        }
+    }
+
+    func vocabularyContext(
+        from settings: TranscriptionVocabularySettings?
+    ) -> (context: CustomVocabularyContext, config: VocabularyRescorer.Config, strengthLabel: String)? {
+        guard let settings, settings.mode != .off else { return nil }
+        let terms = VocabularyTermEntry.normalizeDisplayTerms(settings.terms)
+        guard !terms.isEmpty else { return nil }
+
+        let customTerms = terms.map { term in
+            CustomVocabularyTerm(
+                text: term,
+                weight: nil,
+                aliases: nil
+            )
+        }
+
+        let profile = VocabularyStrengthProfile.from(settings.strength)
+        return (
+            context: CustomVocabularyContext(
+                terms: customTerms
+            ),
+            config: profile.rescorerConfig,
+            strengthLabel: profile.label
+        )
+    }
+
     static func audioStats(for samples: [Float]) -> (seconds: Double, rms: Float, min: Float, max: Float) {
         guard !samples.isEmpty else { return (0, 0, 0, 0) }
         let stride = max(1, samples.count / 100_000)
@@ -93,6 +172,37 @@ private extension FluidAudioTranscriptionService {
         let rms = count > 0 ? Float(sqrt(sumSquares / Double(count))) : 0
         let seconds = Double(samples.count) / 16_000.0
         return (seconds, rms, minValue, maxValue)
+    }
+}
+
+private struct VocabularyStrengthProfile: Sendable {
+    let label: String
+    let rescorerConfig: VocabularyRescorer.Config
+
+    static func from(_ strength: VocabularyBoostingStrength?) -> VocabularyStrengthProfile {
+        switch strength ?? .balanced {
+        case .gentle:
+            return VocabularyStrengthProfile(
+                label: VocabularyBoostingStrength.gentle.rawValue,
+                rescorerConfig: VocabularyRescorer.Config(
+                    useAdaptiveThresholds: false,
+                    referenceTokenCount: ContextBiasingConstants.defaultReferenceTokenCount
+                )
+            )
+        case .balanced:
+            return VocabularyStrengthProfile(
+                label: VocabularyBoostingStrength.balanced.rawValue,
+                rescorerConfig: .default
+            )
+        case .aggressive:
+            return VocabularyStrengthProfile(
+                label: VocabularyBoostingStrength.aggressive.rawValue,
+                rescorerConfig: VocabularyRescorer.Config(
+                    useAdaptiveThresholds: true,
+                    referenceTokenCount: 2
+                )
+            )
+        }
     }
 }
 
@@ -184,6 +294,22 @@ private actor FluidAudioASRModelCache {
         }
 
         let models = try await AsrModels.downloadAndLoad(version: version)
+        cached[key] = models
+        return models
+    }
+}
+
+private actor FluidAudioCTCModelCache {
+    static let shared = FluidAudioCTCModelCache()
+    private var cached: [String: CtcModels] = [:]
+
+    func models(variant: CtcModelVariant) async throws -> CtcModels {
+        let key = variant.rawValue
+        if let cached = cached[key] {
+            return cached
+        }
+
+        let models = try await CtcModels.downloadAndLoad(variant: variant)
         cached[key] = models
         return models
     }

@@ -40,26 +40,49 @@ final class ModelsSettingsViewModel: ObservableObject {
             refresh()
         }
     }
+    @Published var vocabularyBoostingEnabled: Bool {
+        didSet {
+            guard oldValue != vocabularyBoostingEnabled else { return }
+            persistVocabularySettings()
+        }
+    }
+    @Published var vocabularyBoostingTermsInput: String {
+        didSet {
+            guard oldValue != vocabularyBoostingTermsInput else { return }
+            persistVocabularySettings()
+        }
+    }
+    @Published var vocabularyBoostingStrength: VocabularyBoostingStrength {
+        didSet {
+            guard oldValue != vocabularyBoostingStrength else { return }
+            persistVocabularySettings()
+        }
+    }
 
     private let modelManager: any ModelManaging
+    private let vocabularySettingsStore: any VocabularyBoostingSettingsStoring
     private let summarizationModelStore: SummarizationModelSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
     private var modelTask: Task<Void, Never>?
     private var modelsValidationTask: Task<Void, Never>?
+    private var isRestoringVocabularySettings = false
+    private var lastModelValidation = ModelValidationResult(missingModelIDs: [], invalidModelIDs: [])
 
     init(
         modelManager: (any ModelManaging)? = nil,
         summarizationModelStore: SummarizationModelSelectionStore = SummarizationModelSelectionStore(),
         transcriptionModelStore: TranscriptionModelSelectionStore = TranscriptionModelSelectionStore(),
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
-        fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore()
+        fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore(),
+        vocabularySettingsStore: (any VocabularyBoostingSettingsStoring)? = nil
     ) {
         self.summarizationModelStore = summarizationModelStore
         self.transcriptionModelStore = transcriptionModelStore
         self.transcriptionBackendStore = transcriptionBackendStore
         self.fluidAudioModelStore = fluidAudioModelStore
+        self.vocabularySettingsStore = vocabularySettingsStore ?? VocabularyBoostingSettingsStore()
         self.modelManager = modelManager ?? DefaultModelManager(
             selectionStore: summarizationModelStore,
             transcriptionSelectionStore: transcriptionModelStore,
@@ -86,6 +109,10 @@ final class ModelsSettingsViewModel: ObservableObject {
         if fluidAudioModelStore.selectedModelID() != selectedFluidModel.id {
             fluidAudioModelStore.setSelectedModelID(selectedFluidModel.id)
         }
+        let vocabularySettings = self.vocabularySettingsStore.load()
+        self.vocabularyBoostingEnabled = vocabularySettings.enabled
+        self.vocabularyBoostingTermsInput = vocabularySettings.editorInput
+        self.vocabularyBoostingStrength = vocabularySettings.strength
         refresh()
     }
 
@@ -147,6 +174,7 @@ final class ModelsSettingsViewModel: ObservableObject {
         do {
             let result = try await modelManager.validateModels()
             guard !Task.isCancelled else { return }
+            lastModelValidation = result
             if result.isReady {
                 state = .ready
             } else {
@@ -154,6 +182,7 @@ final class ModelsSettingsViewModel: ObservableObject {
             }
         } catch {
             guard !Task.isCancelled else { return }
+            lastModelValidation = ModelValidationResult(missingModelIDs: [], invalidModelIDs: [])
             let message = ErrorHandler.userMessage(for: error, fallback: "Failed to check model status.")
             state = .needsDownload(message: message)
         }
@@ -208,6 +237,60 @@ final class ModelsSettingsViewModel: ObservableObject {
         TranscriptionBackend.displayName(for: selectedTranscriptionBackendID)
     }
 
+    var vocabularyHintText: String {
+        "Use for names, acronyms, product terms."
+    }
+
+    var vocabularyBoostingTerms: [String] {
+        VocabularyTermEntry.parseFromEditorInput(vocabularyBoostingTermsInput, source: .global)
+            .map(\.displayText)
+    }
+
+    var vocabularyReadinessStatus: VocabularyReadinessStatus {
+        let backend = TranscriptionBackend.backend(for: selectedTranscriptionBackendID)
+        guard backend == .fluidAudio else {
+            return .unsupported(backend: backend)
+        }
+
+        let vocabularyIDs = lastModelValidation.missingModelIDs.filter {
+            $0.hasSuffix("-ctc-vocab")
+        }
+        if !vocabularyIDs.isEmpty {
+            let names = vocabularyIDs.map(displayName(for:))
+            return .missingModels(
+                backend: backend,
+                message: "Missing: \(names.joined(separator: ", "))"
+            )
+        }
+
+        if case .needsDownload(let message) = state {
+            return .missingModels(
+                backend: backend,
+                message: message ?? "Vocabulary models are not ready."
+            )
+        }
+
+        return .ready(backend: backend)
+    }
+
+    var showsVocabularyReadinessRow: Bool {
+        isFluidAudioSelected && vocabularyReadinessStatus.state == .missingModels
+    }
+
+    var vocabularyReadinessMessage: String? {
+        vocabularyReadinessStatus.message
+    }
+
+    private func persistVocabularySettings() {
+        guard !isRestoringVocabularySettings else { return }
+        let settings = GlobalVocabularyBoostingSettings(
+            enabled: vocabularyBoostingEnabled,
+            strength: vocabularyBoostingStrength,
+            terms: vocabularyBoostingTerms
+        )
+        vocabularySettingsStore.save(settings)
+    }
+
     private func displayName(for id: String) -> String {
         if let summarization = SummarizationModelCatalog.model(for: id) {
             return summarization.displayName
@@ -217,6 +300,9 @@ final class ModelsSettingsViewModel: ObservableObject {
         }
         if let fluidAudio = FluidAudioASRModelCatalog.model(for: id) {
             return fluidAudio.displayName
+        }
+        if id.hasSuffix("-ctc-vocab") {
+            return "FluidAudio CTC Vocabulary"
         }
         return id
     }

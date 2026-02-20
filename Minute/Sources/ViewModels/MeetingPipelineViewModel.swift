@@ -69,6 +69,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     enum CaptureState: Equatable {
         case ready
         case recording
+        case stopping
     }
 
     @Published private(set) var state: MeetingPipelineState = .idle
@@ -90,6 +91,12 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var activeSilenceAlert: RecordingAlert? = nil
     @Published private(set) var activeScreenContextAlert: RecordingAlert? = nil
     @Published private(set) var recordingSessionEvents: [RecordingSessionEvent] = []
+    @Published private(set) var transcriptionBackend: TranscriptionBackend = .whisper
+    @Published private(set) var sessionVocabularyMode: VocabularyBoostingSessionMode = .default
+    @Published private(set) var sessionCustomVocabularyInput: String = ""
+    @Published private(set) var sessionVocabularyWarningMessage: String? = nil
+    @Published private(set) var vocabularyBoostingEnabledInSettings: Bool = false
+    @Published private(set) var globalVocabularyTerms: [String] = []
     @Published var meetingType: MeetingType = .autodetect
     @Published var languageProcessing: LanguageProcessingProfile = .autoToEnglish
     @Published var outputLanguage: OutputLanguage = .defaultSelection
@@ -136,6 +143,22 @@ final class MeetingPipelineViewModel: ObservableObject {
         activeScreenContextAlert?.expiresAt.map { max(Int(ceil($0.timeIntervalSinceNow)), 0) }
     }
 
+    var isFluidAudioBackendSelected: Bool {
+        transcriptionBackend == .fluidAudio
+    }
+
+    var sessionVocabularyHintText: String {
+        "Use for names, acronyms, product terms. Settings terms are included automatically."
+    }
+
+    var showsSessionVocabularyPopoverButton: Bool {
+        isFluidAudioBackendSelected && vocabularyBoostingEnabledInSettings
+    }
+
+    var sessionVocabularyListLabel: String {
+        sessionVocabularyMode == .custom ? "Custom" : "Default"
+    }
+
     private let audioService: any AudioServicing
     private let mediaImportService: any MediaImporting
     private let recoveryService: any RecordingRecoveryServicing
@@ -149,6 +172,10 @@ final class MeetingPipelineViewModel: ObservableObject {
     private let stagePreferencesStore: StagePreferencesStore
     private let silenceDetectionPolicy: SilenceDetectionPolicy
     private let recordingAlertNotifier: any RecordingAlertNotifying
+    private let transcriptionBackendStore: TranscriptionBackendSelectionStore
+    private let vocabularySettingsStore: any VocabularyBoostingSettingsStoring
+    private let sessionVocabularyResolver: any SessionVocabularyResolving
+    private let modelValidationProvider: @Sendable () async throws -> ModelValidationResult
 
     private let vaultAccess: VaultAccess
 
@@ -171,6 +198,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
     private var silenceController: (any SilenceAutoStopControlling)?
     private var screenContextAutoStopTask: Task<Void, Never>?
+    private var sessionVocabularyReadiness = VocabularyReadinessStatus.unsupported(backend: .whisper)
 	
     init(
         audioService: some AudioServicing,
@@ -184,7 +212,11 @@ final class MeetingPipelineViewModel: ObservableObject {
         recordingPermissions: RecordingPermissions = .live(),
         stagePreferencesStore: StagePreferencesStore = StagePreferencesStore(),
         silenceDetectionPolicy: SilenceDetectionPolicy = .default,
-        recordingAlertNotifier: (any RecordingAlertNotifying)? = nil
+        recordingAlertNotifier: (any RecordingAlertNotifying)? = nil,
+        transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
+        vocabularySettingsStore: (any VocabularyBoostingSettingsStoring) = VocabularyBoostingSettingsStore(),
+        sessionVocabularyResolver: (any SessionVocabularyResolving) = SessionVocabularyResolver(),
+        modelValidationProvider: (@Sendable () async throws -> ModelValidationResult)? = nil
     ) {
         self.audioService = audioService
         self.mediaImportService = mediaImportService
@@ -200,6 +232,10 @@ final class MeetingPipelineViewModel: ObservableObject {
         self.stagePreferencesStore = stagePreferencesStore
         self.silenceDetectionPolicy = silenceDetectionPolicy
         self.recordingAlertNotifier = recordingAlertNotifier ?? RecordingAlertNotificationCoordinator()
+        self.transcriptionBackendStore = transcriptionBackendStore
+        self.vocabularySettingsStore = vocabularySettingsStore
+        self.sessionVocabularyResolver = sessionVocabularyResolver
+        self.modelValidationProvider = modelValidationProvider ?? { ModelValidationResult(missingModelIDs: [], invalidModelIDs: []) }
         self.vaultAccess = vaultAccess
         self.screenCaptureEnabled = screenContextSettingsStore.isEnabled
 
@@ -207,6 +243,8 @@ final class MeetingPipelineViewModel: ObservableObject {
 
         refreshVaultStatus()
         refreshOutputLanguageSetting()
+        refreshTranscriptionBackendSetting()
+        refreshVocabularySettings()
         refreshMicrophonePermission()
         refreshScreenRecordingPermission()
 
@@ -215,6 +253,8 @@ final class MeetingPipelineViewModel: ObservableObject {
             .sink { [weak self] _ in
                 self?.refreshVaultStatus()
                 self?.refreshOutputLanguageSetting()
+                self?.refreshTranscriptionBackendSetting()
+                self?.refreshVocabularySettings()
             }
 
         startStagePreferencesObservation()
@@ -352,17 +392,18 @@ final class MeetingPipelineViewModel: ObservableObject {
 
         let bookmarkStore = UserDefaultsVaultBookmarkStore(key: AppConfiguration.Defaults.vaultRootBookmarkKey)
         let vaultAccess = VaultAccess(bookmarkStore: bookmarkStore)
+        let modelManager = DefaultModelManager(
+            selectionStore: selectionStore,
+            transcriptionSelectionStore: transcriptionSelectionStore,
+            transcriptionBackendStore: transcriptionBackendStore,
+            fluidAudioModelStore: fluidAudioModelStore
+        )
         let coordinator = MeetingPipelineCoordinator(
             transcriptionService: transcriptionService,
             diarizationService: FluidAudioOfflineDiarizationService.meetingDefault(),
             summarizationServiceProvider: summarizationServiceProvider,
             audioLoudnessNormalizer: AudioLoudnessNormalizer(),
-            modelManager: DefaultModelManager(
-                selectionStore: selectionStore,
-                transcriptionSelectionStore: transcriptionSelectionStore,
-                transcriptionBackendStore: transcriptionBackendStore,
-                fluidAudioModelStore: fluidAudioModelStore
-            ),
+            modelManager: modelManager,
             vaultAccess: vaultAccess,
             vaultWriter: DefaultVaultWriter()
         )
@@ -375,7 +416,13 @@ final class MeetingPipelineViewModel: ObservableObject {
             screenContextCaptureService: ScreenContextCaptureService(inferencer: screenInferencer),
             screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: screenInferencer),
             screenContextSettingsStore: ScreenContextSettingsStore(),
-            vaultAccess: vaultAccess
+            vaultAccess: vaultAccess,
+            transcriptionBackendStore: transcriptionBackendStore,
+            vocabularySettingsStore: VocabularyBoostingSettingsStore(),
+            sessionVocabularyResolver: SessionVocabularyResolver(),
+            modelValidationProvider: {
+                try await modelManager.validateModels()
+            }
         )
     }
 
@@ -392,6 +439,40 @@ final class MeetingPipelineViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         let rawValue = defaults.string(forKey: AppConfiguration.Defaults.outputLanguageKey)
         outputLanguage = OutputLanguage.resolved(from: rawValue)
+    }
+
+    func refreshTranscriptionBackendSetting() {
+        transcriptionBackend = transcriptionBackendStore.selectedBackend()
+        if transcriptionBackend != .fluidAudio {
+            sessionVocabularyWarningMessage = nil
+            sessionVocabularyReadiness = .unsupported(backend: transcriptionBackend)
+        }
+        syncSessionVocabularyModeWithCurrentInput()
+    }
+
+    func refreshVocabularySettings() {
+        let settings = vocabularySettingsStore.load()
+        vocabularyBoostingEnabledInSettings = settings.enabled
+        globalVocabularyTerms = settings.terms
+        syncSessionVocabularyModeWithCurrentInput(using: settings)
+    }
+
+    func setSessionVocabularyMode(_ mode: VocabularyBoostingSessionMode) {
+        if mode == .custom {
+            sessionVocabularyMode = .custom
+            return
+        }
+
+        sessionCustomVocabularyInput = ""
+        syncSessionVocabularyModeWithCurrentInput()
+        if mode == .off {
+            sessionVocabularyWarningMessage = nil
+        }
+    }
+
+    func setSessionCustomVocabularyInput(_ input: String) {
+        sessionCustomVocabularyInput = input
+        syncSessionVocabularyModeWithCurrentInput()
     }
 
     func refreshRecoverableRecordings() {
@@ -591,6 +672,7 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     private func startRecordingIfAllowed(selection: ScreenContextWindowSelection?) {
         guard captureState == .ready else { return }
+        guard state.canStartRecording else { return }
         guard !state.canCancelProcessing else { return }
 
         let resolvedSelection: ScreenContextWindowSelection? = {
@@ -606,6 +688,16 @@ final class MeetingPipelineViewModel: ObservableObject {
 
         Task {
             do {
+                sessionVocabularyReadiness = await resolveSessionVocabularyReadiness()
+                let globalSettings = vocabularySettingsStore.load()
+                let vocabularyResolution = sessionVocabularyResolver.resolve(
+                    globalSettings: globalSettings,
+                    sessionMode: sessionVocabularyMode,
+                    sessionCustomInput: sessionCustomVocabularyInput,
+                    readiness: sessionVocabularyReadiness
+                )
+                sessionVocabularyWarningMessage = vocabularyResolution.warningMessage
+
                 microphonePermissionGranted = try await recordingPermissions.requestMicrophonePermission()
                 if shouldCaptureScreen {
                     screenRecordingPermissionGranted = try await recordingPermissions.requestScreenRecordingPermission()
@@ -693,6 +785,7 @@ final class MeetingPipelineViewModel: ObservableObject {
             progress = nil
             state = .idle
             captureState = .ready
+            resetSessionVocabularyOverride()
         }
     }
 
@@ -707,6 +800,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         guard captureState == .recording else { return }
 
         let stoppedAt = Date()
+        captureState = .stopping
 
         Task {
             do {
@@ -734,11 +828,11 @@ final class MeetingPipelineViewModel: ObservableObject {
                 let accepted = await processingOrchestrator.enqueue(meetingID: session.id, context: context)
 
                 screenCaptureSelection = nil
-                captureState = .ready
                 screenContextEvents = []
 
                 if accepted {
                     state = .idle
+                    resetSessionVocabularyOverride()
                 } else {
                     state = .recorded(
                         audioTempURL: result.wavURL,
@@ -747,6 +841,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                         stoppedAt: stoppedAt
                     )
                 }
+                captureState = .ready
             } catch let minuteError as MinuteError {
                 await stopAudioLevelMonitoring()
                 await screenContextCaptureService.cancelCapture()
@@ -901,6 +996,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         activeScreenContextAlert = nil
         silenceStatus = SilenceStatusSnapshot()
         meetingType = .autodetect
+        resetSessionVocabularyOverride()
         Task { @MainActor [recordingAlertNotifier] in
             await recordingAlertNotifier.clearSilenceStopWarning()
             await recordingAlertNotifier.clearSharedWindowClosedWarning()
@@ -1336,6 +1432,19 @@ final class MeetingPipelineViewModel: ObservableObject {
             effectiveOutputLanguage = outputLanguage
         }
 
+        let globalVocabularySettings = vocabularySettingsStore.load()
+        syncSessionVocabularyModeWithCurrentInput(using: globalVocabularySettings)
+        let vocabularyResolution = sessionVocabularyResolver.resolve(
+            globalSettings: globalVocabularySettings,
+            sessionMode: sessionVocabularyMode,
+            sessionCustomInput: sessionCustomVocabularyInput,
+            readiness: sessionVocabularyReadiness
+        )
+        sessionVocabularyMode = vocabularyResolution.effectiveMode
+        if vocabularyResolution.warningMessage != nil {
+            sessionVocabularyWarningMessage = vocabularyResolution.warningMessage
+        }
+
         return PipelineContext(
             vaultFolders: MeetingFileContract.VaultFolders(
                 meetingsRoot: configuration.meetingsRelativePath,
@@ -1352,11 +1461,62 @@ final class MeetingPipelineViewModel: ObservableObject {
             normalizeAnalysisAudio: configuration.normalizeAnalysisAudio,
             screenContextEvents: screenContextEvents,
             transcriptionOverride: nil,
+            transcriptionVocabulary: vocabularyResolution.transcriptionVocabulary,
             meetingType: meetingType,
             languageProcessing: languageProcessing,
             outputLanguage: effectiveOutputLanguage,
             knownSpeakerSuggestionsEnabled: configuration.knownSpeakerSuggestionsEnabled
         )
+    }
+
+    private func resolveSessionVocabularyReadiness() async -> VocabularyReadinessStatus {
+        let backend = transcriptionBackendStore.selectedBackend()
+        guard backend == .fluidAudio else {
+            return .unsupported(backend: backend)
+        }
+
+        do {
+            let validation = try await modelValidationProvider()
+            let vocabularyModelIDs = (validation.missingModelIDs + validation.invalidModelIDs).filter {
+                $0.hasSuffix("-ctc-vocab")
+            }
+            if !vocabularyModelIDs.isEmpty {
+                return .missingModels(
+                    backend: backend,
+                    message: "Vocabulary models missing. Recording will continue without boosting."
+                )
+            }
+            return .ready(backend: backend)
+        } catch {
+            return .missingModels(
+                backend: backend,
+                message: "Vocabulary model status unavailable. Recording will continue without boosting."
+            )
+        }
+    }
+
+    private func resetSessionVocabularyOverride() {
+        sessionCustomVocabularyInput = ""
+        sessionVocabularyWarningMessage = nil
+        sessionVocabularyReadiness = .unsupported(backend: transcriptionBackend)
+        syncSessionVocabularyModeWithCurrentInput()
+    }
+
+    private func syncSessionVocabularyModeWithCurrentInput(
+        using settings: GlobalVocabularyBoostingSettings? = nil
+    ) {
+        let resolvedSettings = settings ?? vocabularySettingsStore.load()
+        let hasCustomTerms = !VocabularyTermEntry.parseFromEditorInput(
+            sessionCustomVocabularyInput,
+            source: .sessionCustom
+        ).isEmpty
+
+        guard transcriptionBackend == .fluidAudio, resolvedSettings.enabled else {
+            sessionVocabularyMode = .off
+            return
+        }
+
+        sessionVocabularyMode = hasCustomTerms ? .custom : .default
     }
 
 
@@ -1391,9 +1551,13 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
 
         let clamped = min(max(level, 0), 1)
-        let quantized = (clamped * 8).rounded() / 8
+        // Keep quiet microphone signal visible without affecting silence auto-stop logic.
+        let visualTarget = min(max(powf(clamped, 0.55), 0), 1)
+        let previous = Float(audioLevelSamples.last ?? 0)
+        let smoothing: Float = visualTarget > previous ? 0.55 : 0.22
+        let smoothed = previous + (visualTarget - previous) * smoothing
         audioLevelSamples.removeFirst()
-        audioLevelSamples.append(CGFloat(quantized))
+        audioLevelSamples.append(CGFloat(smoothed))
 
         if case .recording = state {
             let silenceController = silenceController

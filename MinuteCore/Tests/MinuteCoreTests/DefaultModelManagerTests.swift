@@ -138,4 +138,70 @@ struct DefaultModelManagerTests {
         #expect(!models.contains { $0.id.hasPrefix("whisper/") })
         #expect(models.contains { $0.id.hasPrefix("llm/") })
     }
+
+    @Test
+    func validateModels_mergesFluidAudioVocabularyReadinessWhenFluidBackendSelected() async throws {
+        let suite = "DefaultModelManagerTests.validateModels.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+
+        let backendStore = TranscriptionBackendSelectionStore(defaults: defaults, key: "backend")
+        backendStore.setSelectedBackendID(TranscriptionBackend.fluidAudio.rawValue)
+
+        let spy = SpyFluidAudioModelManager(
+            validationResult: ModelValidationResult(
+                missingModelIDs: ["fluidaudio/asr-v3-ctc-vocab"],
+                invalidModelIDs: []
+            )
+        )
+        let manager = DefaultModelManager(
+            transcriptionBackendStore: backendStore,
+            fluidAudioModelManager: spy
+        )
+
+        let result = try await manager.validateModels()
+        #expect(result.missingModelIDs.contains("fluidaudio/asr-v3-ctc-vocab"))
+    }
+
+    @Test
+    func removeModels_forwardsCtcVocabularyIDsToFluidAudioModelManager() async throws {
+        let suite = "DefaultModelManagerTests.removeModels.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+
+        let backendStore = TranscriptionBackendSelectionStore(defaults: defaults, key: "backend")
+        backendStore.setSelectedBackendID(TranscriptionBackend.fluidAudio.rawValue)
+
+        let spy = SpyFluidAudioModelManager(validationResult: ModelValidationResult(missingModelIDs: [], invalidModelIDs: []))
+        let manager = DefaultModelManager(
+            requiredModels: [],
+            transcriptionBackendStore: backendStore,
+            fluidAudioModelManager: spy
+        )
+
+        try await manager.removeModels(withIDs: ["fluidaudio/asr-v3-ctc-vocab"])
+        let removed = await spy.removedIDs
+        #expect(removed.contains("fluidaudio/asr-v3-ctc-vocab"))
+    }
+}
+
+actor SpyFluidAudioModelManager: FluidAudioModelManaging {
+    private(set) var removedIDs: [String] = []
+    private let validationResult: ModelValidationResult
+
+    init(validationResult: ModelValidationResult) {
+        self.validationResult = validationResult
+    }
+
+    func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws {
+        progress?(ModelDownloadProgress(fractionCompleted: 1, label: "ready"))
+    }
+
+    func validateModels() async throws -> ModelValidationResult {
+        validationResult
+    }
+
+    func removeModels(withIDs ids: [String]) async throws {
+        removedIDs.append(contentsOf: ids)
+    }
 }

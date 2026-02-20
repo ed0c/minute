@@ -31,6 +31,7 @@ struct RecordingSessionCardView: View {
     let onUploadTap: () -> Void
 
     @State private var isScreenContextPopoverPresented = false
+    @State private var isVocabularyPopoverPresented = false
 
     private var microphoneBinding: Binding<Bool> {
         Binding(
@@ -46,13 +47,28 @@ struct RecordingSessionCardView: View {
         )
     }
 
+    private var customVocabularyInputBinding: Binding<String> {
+        Binding(
+            get: { model.sessionCustomVocabularyInput },
+            set: { model.setSessionCustomVocabularyInput($0) }
+        )
+    }
+
+    private var vocabularyButtonSymbolName: String {
+        model.sessionVocabularyMode == .custom ? "bubble.right.fill" : "bubble.right"
+    }
+
     private var isRecording: Bool {
         if case .recording = model.state { return true }
         return false
     }
 
+    private var isStopping: Bool {
+        model.captureState == .stopping
+    }
+
     private var isListening: Bool {
-        isRecording && (model.microphoneCaptureEnabled || model.systemAudioCaptureEnabled)
+        !isStopping && isRecording && (model.microphoneCaptureEnabled || model.systemAudioCaptureEnabled)
     }
 
     private var topInset: CGFloat {
@@ -69,7 +85,15 @@ struct RecordingSessionCardView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
 
-                        if isRecording {
+                        if isStopping {
+                            Text("Stopping session")
+                                .font(.system(size: 20, weight: .semibold))
+                                .tracking(-0.4)
+                                .foregroundStyle(Color.minuteTextPrimary)
+                            Text("Finalizing audio capture...")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color.minuteTextSecondary)
+                        } else if isRecording {
                             Text("Session in progress")
                                 .font(.system(size: 20, weight: .semibold))
                                 .tracking(-0.4)
@@ -137,34 +161,77 @@ struct RecordingSessionCardView: View {
                             .minuteFootnote()
                             .textCase(.uppercase)
 
-                        Menu {
-                            Button(model.autoToEnglishOptionTitle) {
-                                model.languageProcessing = .autoToEnglish
+                        HStack(alignment: .center, spacing: 8) {
+                            Menu {
+                                Button(model.autoToEnglishOptionTitle) {
+                                    model.languageProcessing = .autoToEnglish
+                                }
+                                Button(model.autoToPickedLanguageOptionTitle) {
+                                    model.languageProcessing = .autoPreserve
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "globe")
+                                        .foregroundStyle(Color.green)
+                                    Text(model.selectedLanguageProcessingTitle)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Color.minuteTextPrimary)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.minuteTextSecondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            Button(model.autoToPickedLanguageOptionTitle) {
-                                model.languageProcessing = .autoPreserve
+                            .menuStyle(.borderlessButton)
+                            .frame(maxWidth: .infinity)
+                            .minuteDropdownStyle()
+                            .help(model.selectedLanguageProcessingDetailText)
+                            .accessibilityLabel(Text("Language Processing"))
+                            .accessibilityValue(Text(model.selectedLanguageProcessingTitle))
+                            .accessibilityHint(Text(model.selectedLanguageProcessingDetailText))
+
+                            if model.showsSessionVocabularyPopoverButton {
+                                Button {
+                                    isVocabularyPopoverPresented = true
+                                } label: {
+                                    Image(systemName: vocabularyButtonSymbolName)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(
+                                            model.sessionVocabularyMode == .custom
+                                                ? Color.minuteGlow
+                                                : Color.minuteTextSecondary
+                                        )
+                                        .frame(width: 44, height: 44)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color.minuteSurface)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(Color.minuteOutline, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .help("Vocabulary list: \(model.sessionVocabularyListLabel)")
+                                .accessibilityLabel(Text("Vocabulary terms"))
+                                .accessibilityValue(Text(model.sessionVocabularyListLabel))
+                                .popover(isPresented: $isVocabularyPopoverPresented, arrowEdge: .bottom) {
+                                    SessionVocabularyPopover(
+                                        termsInput: customVocabularyInputBinding,
+                                        settingsTerms: model.globalVocabularyTerms,
+                                        hintText: model.sessionVocabularyHintText,
+                                        listLabel: model.sessionVocabularyListLabel
+                                    )
+                                }
                             }
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "globe")
-                                    .foregroundStyle(Color.green)
-                                Text(model.selectedLanguageProcessingTitle)
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color.minuteTextPrimary)
-                                Spacer(minLength: 8)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.minuteTextSecondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .menuStyle(.borderlessButton)
-                        .frame(maxWidth: .infinity)
-                        .minuteDropdownStyle()
-                        .help(model.selectedLanguageProcessingDetailText)
-                        .accessibilityLabel(Text("Language Processing"))
-                        .accessibilityValue(Text(model.selectedLanguageProcessingTitle))
-                        .accessibilityHint(Text(model.selectedLanguageProcessingDetailText))
+
+                        if let message = model.sessionVocabularyWarningMessage, !message.isEmpty {
+                            Text(message)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -237,6 +304,7 @@ struct RecordingSessionCardView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
             }
 
             Group {
@@ -418,7 +486,7 @@ struct WaveformRibbonView: View {
                 var path = Path()
                 for index in 0..<count {
                     let x = size.width * CGFloat(index) / CGFloat(max(count - 1, 1))
-                    let level = max(min(levels[safe: index] ?? 0, 1), 0.05)
+                    let level = min(max(levels[safe: index] ?? 0, 0), 1)
                     let wave = sin(CGFloat(index) * 0.35 + phase) * level
                     let y = midY + wave * midY * 0.9
                     if index == 0 {

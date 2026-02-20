@@ -20,6 +20,10 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let micActivityNotificationsEnabledKey = "micActivityNotificationsEnabled"
         public static let knownSpeakerSuggestionsEnabledKey = "knownSpeakerSuggestionsEnabled"
         public static let outputLanguageKey = "outputLanguage"
+        public static let vocabularyBoostingEnabledKey = "vocabularyBoostingEnabled"
+        public static let vocabularyBoostingTermsKey = "vocabularyBoostingTerms"
+        public static let vocabularyBoostingStrengthKey = "vocabularyBoostingStrength"
+        public static let vocabularyBoostingUpdatedAtKey = "vocabularyBoostingUpdatedAt"
 
         public static let stageMeetingTypeKey = "stageMeetingType"
         public static let stageLanguageProcessingKey = "stageLanguageProcessing"
@@ -40,6 +44,8 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let defaultOutputLanguage = OutputLanguage.defaultSelection
         public static let defaultTranscriptionBackendID = TranscriptionBackend.whisper.rawValue
         public static let defaultFluidAudioAsrModelID = FluidAudioASRModelCatalog.defaultModelID
+        public static let defaultVocabularyBoostingEnabled = false
+        public static let defaultVocabularyBoostingStrength = VocabularyBoostingStrength.balanced
 
         public static let defaultStageMeetingType = MeetingType.autodetect
         public static let defaultStageLanguageProcessing = LanguageProcessingProfile.autoToEnglish
@@ -58,6 +64,9 @@ public struct AppConfiguration: Sendable, Equatable {
     public var screenContextCaptureIntervalSeconds: TimeInterval
     public var micActivityNotificationsEnabled: Bool
     public var knownSpeakerSuggestionsEnabled: Bool
+    public var vocabularyBoostingEnabled: Bool
+    public var vocabularyBoostingTerms: [String]
+    public var vocabularyBoostingStrength: VocabularyBoostingStrength
 
     public init(defaults: UserDefaults = .standard) {
         meetingsRelativePath = Self.validatedRelativePath(
@@ -91,6 +100,15 @@ public struct AppConfiguration: Sendable, Equatable {
 
         knownSpeakerSuggestionsEnabled = defaults.object(forKey: Defaults.knownSpeakerSuggestionsEnabledKey) as? Bool
             ?? Defaults.defaultKnownSpeakerSuggestionsEnabled
+
+        vocabularyBoostingEnabled = defaults.object(forKey: Defaults.vocabularyBoostingEnabledKey) as? Bool
+            ?? Defaults.defaultVocabularyBoostingEnabled
+        vocabularyBoostingTerms = VocabularyTermEntry.normalizeDisplayTerms(
+            defaults.stringArray(forKey: Defaults.vocabularyBoostingTermsKey) ?? []
+        )
+        let strengthRaw = defaults.string(forKey: Defaults.vocabularyBoostingStrengthKey) ?? ""
+        vocabularyBoostingStrength = VocabularyBoostingStrength(rawValue: strengthRaw)
+            ?? Defaults.defaultVocabularyBoostingStrength
     }
 
     public static func validatedRelativePath(_ value: String?, fallback: String) -> String {

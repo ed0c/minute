@@ -82,6 +82,11 @@ public actor MeetingPipelineCoordinator {
             let transcription: TranscriptionResult
             if let override = context.transcriptionOverride, !override.text.isEmpty {
                 transcription = override
+            } else if let vocabularyService = transcriptionService as? (any VocabularyBoostingTranscriptionServicing) {
+                transcription = try await vocabularyService.transcribe(
+                    wavURL: context.analysisAudioURL,
+                    vocabulary: context.transcriptionVocabulary
+                )
             } else {
                 transcription = try await transcriptionService.transcribe(wavURL: context.analysisAudioURL)
             }
