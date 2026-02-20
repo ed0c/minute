@@ -80,6 +80,8 @@ public struct VocabularyReadinessStatus: Sendable, Equatable {
 }
 
 public struct VocabularyTermEntry: Codable, Sendable, Equatable, Hashable {
+    private static let normalizationLocale = Locale(identifier: "en_US_POSIX")
+
     public enum Source: String, Codable, Sendable, Equatable {
         case global
         case sessionCustom
@@ -98,9 +100,9 @@ public struct VocabularyTermEntry: Codable, Sendable, Equatable, Hashable {
 
     public static func normalizedKey(for value: String) -> String {
         value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: normalizationLocale)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+            .lowercased(with: normalizationLocale)
     }
 
     public static func normalizeDisplayTerms(_ values: [String]) -> [String] {

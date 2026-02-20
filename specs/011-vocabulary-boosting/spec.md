@@ -3,7 +3,7 @@
 **Feature Branch**: `011-vocabulary-boosting`  
 **Created**: 2026-02-18  
 **Status**: Draft  
-**Input**: User description: "Specify new feature for word boosting. This specification prefix is 011. Step 0: Upgrade fluidaudio package to latest version. 1. Global setup (Settings -> AI, in Minute/Sources/Views/Settings/ ModelsSettingsSection.swift) - Add a Vocabulary Boosting block shown only when backend is FluidAudio. - Controls: - Toggle: Enable vocabulary boosting - Multi-term editor (comma/newline separated words and phrases) - Optional Strength segmented control: Gentle / Balanced / Aggressive (no raw numeric weights in UI) - If required CTC vocab models are missing, show an inline status row like existing model download UI. 2. Per-session override (RecordingSessionCardView in Minute/Sources/Views/Pipeline/Stage/ SessionViews.swift) - Add a compact row: Vocabulary: Off / Default / Custom. - Custom opens a small popover to add meeting-specific terms (project names, people, - Hide/disable this UI when backend is Whisper. - Keep advanced internals out of UI; expose simple terms + strength only. - Show a short hint near the control: Use for names, acronyms, product terms. If you want, I can implement this exact UX as an MVP with: 1. global term list + enable toggle 2. per-session quick override 3. backend-aware gating and labels"
+**Input**: User description: "Specify new feature for word boosting. This specification prefix is 011. Step 0: Upgrade fluidaudio package to latest version. 1. Global setup (Settings -> AI, in Minute/Sources/Views/Settings/ ModelsSettingsSection.swift) - Add a Vocabulary Boosting block shown only when backend is FluidAudio. - Controls: - Toggle: Enable vocabulary boosting - Multi-term editor (comma/newline separated words and phrases) - Optional Strength segmented control: Gentle / Balanced / Aggressive (no raw numeric weights in UI) - If required CTC vocab models are missing, show an inline status row like existing model download UI. 2. Per-session override (RecordingSessionCardView in Minute/Sources/Views/Pipeline/Stage/ SessionViews.swift) - Provide a compact vocabulary shortcut button that opens a small popover for meeting-specific terms (project names, people). - Hide/disable this UI when backend is Whisper. - Keep advanced internals out of UI; expose simple terms + strength only. - Show a short hint near the control: Use for names, acronyms, product terms. If you want, I can implement this exact UX as an MVP with: 1. global term list + enable toggle 2. per-session quick override 3. backend-aware gating and labels"
 
 ## Clarifications
 
@@ -14,6 +14,7 @@
 - Q: How should duplicate and case-variant vocabulary entries be handled? → A: Trim whitespace, remove blank entries, and deduplicate case-insensitively while preserving first-entered order/casing.
 - Q: In Custom mode, do session terms replace or add to global terms? → A: Session custom terms are additive and combine with global terms for that session.
 - Q: How long should Custom session terms persist? → A: Persist for that session until completed/cancelled, and do not copy to new sessions.
+- Q: Should the session card expose an explicit Off/Default/Custom selector? → A: No for this iteration; use a single compact vocabulary button + popover, with effective behavior derived from global enablement/readiness and whether session custom terms are present.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -33,21 +34,20 @@ As a user who relies on local transcription, I want to define a reusable vocabul
 
 ---
 
-### User Story 2 - Override vocabulary per recording session (Priority: P2)
+### User Story 2 - Add per-session custom vocabulary terms (Priority: P2)
 
-As a user preparing a specific meeting, I want quick per-session vocabulary controls so I can disable boosting or add meeting-specific terms without changing my global defaults.
+As a user preparing a specific meeting, I want quick per-session vocabulary controls so I can add meeting-specific terms without changing my global defaults.
 
 **Why this priority**: Session-level overrides prevent global setting churn and support meeting-specific context.
 
-**Independent Test**: Start a recording session, set Vocabulary to Off, Default, and Custom in separate runs, enter custom terms in the popover for Custom, and verify each mode applies only to that session.
+**Independent Test**: Start a recording session with FluidAudio and global vocabulary enabled, open the vocabulary popover, enter custom terms for one run and clear them for another run, and verify custom terms apply only to that session while empty custom input falls back to global-only behavior.
 
 **Acceptance Scenarios**:
 
-1. **Given** a session card with FluidAudio backend, **When** the user views controls, **Then** a compact Vocabulary row is shown with Off, Default, and Custom options.
-2. **Given** the user chooses Custom, **When** they add meeting-specific terms and confirm, **Then** those terms are combined with global terms and applied only to that session.
-3. **Given** the user chooses Custom with no custom terms, **When** the session runs, **Then** the system applies Default behavior using global vocabulary settings.
-4. **Given** the user chooses Off, **When** the session runs, **Then** vocabulary boosting is not applied for that session even if global boosting is enabled.
-5. **Given** the user chooses Default, **When** the session runs, **Then** global vocabulary boosting behavior is applied unchanged.
+1. **Given** a session card with FluidAudio backend and global vocabulary boosting enabled, **When** the user views controls, **Then** a compact vocabulary shortcut button is shown and opens a custom-terms popover.
+2. **Given** the user adds meeting-specific terms in the popover, **When** the session runs, **Then** those terms are combined with global terms and applied only to that session.
+3. **Given** the session custom terms are empty, **When** the session runs, **Then** the system applies global vocabulary behavior without session additions.
+4. **Given** global boosting is disabled or vocabulary readiness is missing, **When** the session runs, **Then** recording continues and vocabulary boosting is disabled with warning/status messaging.
 
 ---
 
@@ -72,7 +72,7 @@ As a user, I want vocabulary controls to appear only when supported and clearly 
 - The term list includes duplicates, mixed separators, blank lines, or extra whitespace.
 - The user switches backend from FluidAudio to Whisper after configuring global or per-session vocabulary settings.
 - Custom terms persist while a session remains active, but are not copied to newly created sessions.
-- A session is set to Custom with no custom terms; the system should fall back to Default behavior.
+- Session custom input is empty; the system should fall back to global-only behavior.
 - Required vocabulary models become unavailable after previously being ready.
 
 ## Requirements *(mandatory)*
@@ -87,17 +87,17 @@ As a user, I want vocabulary controls to appear only when supported and clearly 
 - **FR-006**: The global section MUST provide strength choices labeled Gentle, Balanced, and Aggressive.
 - **FR-007**: The UI MUST not expose raw numeric boosting weights to users.
 - **FR-008**: When required vocabulary models are missing for the active backend, the global section MUST display an inline status row that indicates missing prerequisites and available remediation action.
-- **FR-009**: Each recording session card MUST provide a Vocabulary selector with Off, Default, and Custom options when the active backend supports vocabulary boosting.
-- **FR-010**: Selecting Custom MUST allow entry of meeting-specific vocabulary terms in a compact popover.
+- **FR-009**: Each recording session card MUST provide a compact vocabulary shortcut control (chat-bubble button) when the active backend supports vocabulary boosting and global boosting is enabled.
+- **FR-010**: The session vocabulary shortcut control MUST open a compact popover for meeting-specific term entry.
 - **FR-011**: Per-session Custom terms MUST apply only to the current session and MUST not overwrite global terms.
 - **FR-011A**: In Custom mode, the session vocabulary set MUST be constructed as global terms plus session-specific custom terms for that session.
 - **FR-011B**: Session-specific Custom terms MUST persist for the lifetime of that session (until completion or cancellation) and MUST NOT be carried into newly created sessions.
-- **FR-012**: Selecting Off for a session MUST disable vocabulary boosting for that session regardless of global settings.
-- **FR-013**: Selecting Default for a session MUST apply global vocabulary settings without modification.
+- **FR-012**: When session custom terms are empty, the session MUST apply global vocabulary settings without modification.
+- **FR-013**: The per-session UI MUST keep mode internals out of view and expose only simple session term editing in a compact control.
 - **FR-014**: When the active backend does not support vocabulary boosting, global and per-session vocabulary controls MUST be hidden or disabled.
 - **FR-015**: The per-session vocabulary control area MUST include a short usage hint for names, acronyms, and product terms.
 - **FR-016**: If required vocabulary models are missing when a session starts, the system MUST allow recording to start, disable vocabulary boosting for that session, and surface a clear warning/status.
-- **FR-017**: If a session is set to Custom and no custom terms are provided, the system MUST treat the session as Default and apply global vocabulary settings.
+- **FR-017**: If session custom input contains only blanks or duplicate-only terms after normalization, the system MUST treat the session as global-only behavior and apply global vocabulary settings.
 - **FR-018**: The system MUST normalize vocabulary term input by trimming surrounding whitespace, removing blank entries, and deduplicating entries case-insensitively while preserving first-entered order and display casing.
 
 ### Non-Functional Requirements *(mandatory)*
@@ -111,7 +111,7 @@ As a user, I want vocabulary controls to appear only when supported and clearly 
 ### Key Entities *(include if feature involves data)*
 
 - **Global Vocabulary Configuration**: User-defined default state containing enabled/disabled flag, term list, and strength level.
-- **Session Vocabulary Override**: Per-session selection of Off, Default, or Custom, plus optional session-specific terms for Custom mode and lifecycle limited to that session.
+- **Session Vocabulary Override**: Per-session optional custom term input collected through a compact popover; effective behavior is derived from global settings/readiness plus whether custom terms exist, with lifecycle limited to that session.
 - **Vocabulary Readiness Status**: Current availability state of required vocabulary prerequisites for the active backend.
 - **Vocabulary Term Entry**: A single word or phrase parsed from comma/newline input, normalized for consistent use.
 
@@ -119,7 +119,7 @@ As a user, I want vocabulary controls to appear only when supported and clearly 
 
 - FluidAudio is the only backend in scope for vocabulary boosting in this release.
 - Whisper remains unsupported for vocabulary boosting and should not expose these controls.
-- Session-level strength follows the global strength setting; per-session customization in this release is limited to mode selection and terms.
+- Session-level strength follows the global strength setting; per-session customization in this release is limited to optional custom terms.
 - Existing configured global terms remain saved even when users temporarily switch to an unsupported backend.
 
 ## Dependencies
@@ -132,7 +132,7 @@ As a user, I want vocabulary controls to appear only when supported and clearly 
 ### Measurable Outcomes
 
 - **SC-001**: At least 95% of users in usability testing can configure global vocabulary boosting (toggle, terms, strength) without assistance in under 90 seconds.
-- **SC-002**: At least 95% of tested sessions correctly apply the selected session vocabulary mode (Off, Default, Custom) on first attempt.
+- **SC-002**: At least 95% of tested sessions correctly apply effective per-session vocabulary behavior (global-only when custom is empty; global-plus-custom when custom terms are provided) on first attempt.
 - **SC-003**: At least 99% of sessions using Custom mode keep global vocabulary settings unchanged after session completion.
 - **SC-004**: In readiness-state validation, 100% of missing prerequisite model conditions surface a visible inline status message before the user starts processing.
 - **SC-005**: At least 90% of beta users report that the vocabulary controls are easy to understand and helpful for names/acronyms/product terms.
