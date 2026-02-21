@@ -251,8 +251,12 @@ final class MeetingPipelineViewModel: ObservableObject {
         refreshMicrophonePermission()
         refreshScreenRecordingPermission()
 
-        defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        defaultsObserver = NotificationCenter.default.publisher(
+            for: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard
+        )
             .receive(on: RunLoop.main)
+            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refreshVaultStatus()
                 self?.refreshOutputLanguageSetting()
@@ -1692,40 +1696,58 @@ private struct FailingTranscriptionService: TranscriptionServicing {
 }
 
 final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unchecked Sendable {
-    private static let disabledXPCVersionDefaultsKey = "minute.whisper.xpc.disabled.version"
+    private static let disabledXPCDefaultsKey = "minute.whisper.xpc.disabled"
+    private static let legacyDisabledXPCVersionDefaultsKey = "minute.whisper.xpc.disabled.version"
+    private static let xpcOptInEnvironmentKey = "MINUTE_ENABLE_WHISPER_XPC"
 
     private let primary: any TranscriptionServicing
     private let fallback: any TranscriptionServicing
     private let defaults: UserDefaults
     private let currentAppVersion: String
     private let stateLock = NSLock()
-    private var xpcDisabledForCurrentVersion: Bool
+    private var xpcDisabled: Bool
     private let logger = Logger(subsystem: "roblibob.Minute", category: "whisper-resilience")
 
     init(
         primary: any TranscriptionServicing,
         fallback: any TranscriptionServicing,
         defaults: UserDefaults = .standard,
+        xpcEnabledByConfiguration: Bool = true,
         currentAppVersion: String = ResilientWhisperTranscriptionService.resolveCurrentAppVersion()
     ) {
         self.primary = primary
         self.fallback = fallback
         self.defaults = defaults
         self.currentAppVersion = currentAppVersion
-        self.xpcDisabledForCurrentVersion =
-            defaults.string(forKey: Self.disabledXPCVersionDefaultsKey) == currentAppVersion
+        let legacyDisabledVersion = defaults.string(forKey: Self.legacyDisabledXPCVersionDefaultsKey)
+        self.xpcDisabled =
+            defaults.bool(forKey: Self.disabledXPCDefaultsKey)
+            || legacyDisabledVersion == currentAppVersion
+            || !xpcEnabledByConfiguration
     }
 
     static func liveDefault() -> ResilientWhisperTranscriptionService {
-        ResilientWhisperTranscriptionService(
+        let xpcOptInEnabled = ProcessInfo.processInfo.environment[Self.xpcOptInEnvironmentKey] == "1"
+        if !xpcOptInEnabled {
+            let inProcess = WhisperLibraryTranscriptionService.liveDefault()
+            return ResilientWhisperTranscriptionService(
+                primary: inProcess,
+                fallback: inProcess,
+                defaults: .standard,
+                xpcEnabledByConfiguration: false
+            )
+        }
+
+        return ResilientWhisperTranscriptionService(
             primary: WhisperXPCTranscriptionService.liveDefault(),
             fallback: WhisperLibraryTranscriptionService.liveDefault(),
-            defaults: .standard
+            defaults: .standard,
+            xpcEnabledByConfiguration: true
         )
     }
 
     func transcribe(wavURL: URL) async throws -> TranscriptionResult {
-        if isXPCDisabledForCurrentVersion() {
+        if isXPCDisabled() {
             return try await fallback.transcribe(wavURL: wavURL)
         }
 
@@ -1736,7 +1758,7 @@ final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unche
                 throw error
             }
 
-            disableXPCForCurrentVersion()
+            disableXPC()
             logger.error("Whisper XPC failed; retrying in-process whisper. reason=\(ErrorHandler.debugMessage(for: error), privacy: .public)")
             return try await fallback.transcribe(wavURL: wavURL)
         }
@@ -1749,21 +1771,22 @@ final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unche
         return "\(shortVersion)-\(buildVersion)"
     }
 
-    private func isXPCDisabledForCurrentVersion() -> Bool {
+    private func isXPCDisabled() -> Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return xpcDisabledForCurrentVersion
+        return xpcDisabled
     }
 
-    private func disableXPCForCurrentVersion() {
+    private func disableXPC() {
         stateLock.lock()
-        if xpcDisabledForCurrentVersion {
+        if xpcDisabled {
             stateLock.unlock()
             return
         }
-        xpcDisabledForCurrentVersion = true
+        xpcDisabled = true
         stateLock.unlock()
-        defaults.set(currentAppVersion, forKey: Self.disabledXPCVersionDefaultsKey)
+        defaults.set(true, forKey: Self.disabledXPCDefaultsKey)
+        defaults.set(currentAppVersion, forKey: Self.legacyDisabledXPCVersionDefaultsKey)
     }
 
     private func shouldFallbackToInProcessWhisper(for error: Error) -> Bool {
@@ -1787,6 +1810,7 @@ final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unche
                     || normalized.contains("nscocoaerrordomain")
                     || normalized.contains("nsposixerrordomain")
                     || normalized.contains("xpc")
+                    || normalized.contains("inherited sandbox")
                     || normalized.contains("unable to obtain a task name port right") {
                     return true
                 }
