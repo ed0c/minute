@@ -27,6 +27,7 @@ final class VaultSettingsModel: ObservableObject {
     @Published var lastErrorMessage: String?
 
     private let bookmarkStore = UserDefaultsVaultBookmarkStore(key: AppConfiguration.Defaults.vaultRootBookmarkKey)
+    private var vaultPathTask: Task<Void, Never>?
 
     init() {
         let defaults = UserDefaults.standard
@@ -44,6 +45,10 @@ final class VaultSettingsModel: ObservableObject {
         )
 
         refreshVaultPathDisplay()
+    }
+
+    deinit {
+        vaultPathTask?.cancel()
     }
 
     func chooseVaultRootFolder() async {
@@ -98,11 +103,18 @@ final class VaultSettingsModel: ObservableObject {
 
     private func refreshVaultPathDisplay() {
         let access = VaultAccess(bookmarkStore: bookmarkStore)
-        do {
-            let url = try access.resolveVaultRootURL()
-            vaultRootPathDisplay = url.path
-        } catch {
-            vaultRootPathDisplay = "Not selected"
+        vaultPathTask?.cancel()
+        vaultPathTask = Task { [weak self] in
+            let displayPath: String
+            do {
+                let url = try await access.resolveVaultRootURL(timeout: .seconds(2))
+                displayPath = url.path
+            } catch {
+                displayPath = "Not selected"
+            }
+
+            guard !Task.isCancelled else { return }
+            self?.vaultRootPathDisplay = displayPath
         }
     }
 

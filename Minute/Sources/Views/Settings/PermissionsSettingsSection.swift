@@ -9,7 +9,7 @@ struct PermissionsSettingsSection: View {
     @State private var screenRecordingPermissionGranted = false
 
     var body: some View {
-        Section("Permissions") {
+        Section("Privacy Permissions") {
             PermissionStatusRow(
                 title: "Microphone Access",
                 detail: "Required to record your voice.",

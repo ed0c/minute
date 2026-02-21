@@ -5,13 +5,27 @@ struct MainSettingsView: View {
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var vaultModel = VaultSettingsModel()
     @StateObject private var modelsModel = ModelsSettingsViewModel()
-    @State private var selection: SettingsSection? = .general
+
+    @AppStorage("minute.settings.lastCategoryID")
+    private var lastCategoryIDRaw: String = SettingsCategoryDefinition.ID.general.rawValue
+
+    @State private var selection: SettingsCategoryDefinition.ID?
 
     var body: some View {
         HStack(spacing: 0) {
             sidebar
             Divider()
             detail
+        }
+        .onAppear {
+            selection = resolvedSelection(candidate: SettingsCategoryDefinition.ID(rawValue: lastCategoryIDRaw))
+        }
+        .onChange(of: selection) { _, newValue in
+            guard let newValue else { return }
+            lastCategoryIDRaw = newValue.rawValue
+        }
+        .onChange(of: availableCategories.map(\.id)) { _, _ in
+            selection = resolvedSelection(candidate: selection)
         }
     }
 
@@ -25,13 +39,16 @@ struct MainSettingsView: View {
                     Form {
                         GeneralSettingsSection()
                         ScreenContextSettingsSection()
+                    }
+                case .storage:
+                    Form {
                         VaultConfigurationView(model: vaultModel, style: .settings)
                     }
                 case .speakers:
                     Form {
                         KnownSpeakersSettingsSection(mode: .manage)
                     }
-                case .permissions:
+                case .privacy:
                     Form {
                         PermissionsSettingsSection()
                     }
@@ -56,20 +73,27 @@ struct MainSettingsView: View {
     }
 
     private var sidebar: some View {
-        List(availableSections, selection: $selection) { section in
-            Label(section.title, systemImage: section.iconName)
+        List(availableCategories, selection: $selection) { category in
+            Label(category.title, systemImage: category.iconName)
                 .imageScale(.medium)
-                .tag(section)
+                .tag(category.id)
+                .accessibilityLabel(category.accessibilityLabel)
         }
+        .accessibilityLabel("Settings categories")
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .frame(width: 200)
+        .frame(width: 230)
     }
 
     private var settingsHeader: some View {
-        HStack {
-            Text(currentSelection.title)
-                .font(.title3.bold())
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(currentCategoryDefinition.title)
+                    .font(.title3.bold())
+
+                Text(currentCategoryDefinition.description)
+                    .minuteCaption()
+            }
 
             Spacer()
 
@@ -88,60 +112,21 @@ struct MainSettingsView: View {
         .padding(.top, 6)
     }
 
-    private var currentSelection: SettingsSection {
-        let section = selection ?? .general
-        return availableSections.contains(section) ? section : .general
+    private var availableCategories: [SettingsCategoryDefinition] {
+        SettingsCategoryCatalog.categories(updatesEnabled: updaterViewModel.isUpdaterEnabled)
     }
 
-    private var availableSections: [SettingsSection] {
-        SettingsSection.visibleCases(updatesEnabled: updaterViewModel.isUpdaterEnabled)
-    }
-}
-
-enum SettingsSection: Identifiable {
-    case general
-    case speakers
-    case permissions
-    case ai
-    case updates
-
-    static func visibleCases(updatesEnabled: Bool) -> [SettingsSection] {
-        if updatesEnabled {
-            return [.general, .speakers, .permissions, .ai, .updates]
-        }
-        return [.general, .speakers, .permissions, .ai]
+    private var currentSelection: SettingsCategoryDefinition.ID {
+        resolvedSelection(candidate: selection) ?? .general
     }
 
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .general:
-            return "General"
-        case .speakers:
-            return "Speakers"
-        case .permissions:
-            return "Permissions"
-        case .ai:
-            return "AI"
-        case .updates:
-            return "Updates"
-        }
+    private var currentCategoryDefinition: SettingsCategoryDefinition {
+        availableCategories.first(where: { $0.id == currentSelection })
+            ?? SettingsCategoryCatalog.categories(updatesEnabled: updaterViewModel.isUpdaterEnabled).first!
     }
 
-    var iconName: String {
-        switch self {
-        case .general:
-            return "gearshape"
-        case .speakers:
-            return "person.2"
-        case .permissions:
-            return "hand.raised"
-        case .ai:
-            return "sparkles"
-        case .updates:
-            return "arrow.down.circle"
-        }
+    private func resolvedSelection(candidate: SettingsCategoryDefinition.ID?) -> SettingsCategoryDefinition.ID? {
+        SettingsCategoryCatalog.fallbackSelection(current: candidate, available: availableCategories)
     }
 }
 
@@ -149,5 +134,5 @@ enum SettingsSection: Identifiable {
     MainSettingsView()
         .environmentObject(AppNavigationModel())
         .environmentObject(UpdaterViewModel.preview)
-        .frame(width: 680, height: 480)
+        .frame(width: 900, height: 620)
 }

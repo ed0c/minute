@@ -22,7 +22,7 @@ struct KnownSpeakersSettingsSection: View {
     }
 
     var body: some View {
-        Section("Known speakers") {
+        Section("People & Speakers") {
             SettingsToggleRow(
                 "Known speaker suggestions",
                 detail: "When enabled, Minute can suggest names for diarized speakers using local-only voice profiles stored on this Mac.",

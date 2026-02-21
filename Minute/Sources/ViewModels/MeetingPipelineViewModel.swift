@@ -185,6 +185,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var processingTask: Task<Void, Never>?
     private var backgroundProcessingObserverTask: Task<Void, Never>?
+    private var vaultStatusTask: Task<Void, Never>?
     private var lastAudioLevelUpdate: CFTimeInterval = 0
     private var screenContextEvents: [ScreenContextEvent] = []
     private var screenCaptureSelection: ScreenContextWindowSelection?
@@ -334,6 +335,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     deinit {
+        vaultStatusTask?.cancel()
         processingTask?.cancel()
         backgroundProcessingObserverTask?.cancel()
         screenContextAutoStopTask?.cancel()
@@ -427,11 +429,19 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     func refreshVaultStatus() {
-        do {
-            let url = try vaultAccess.resolveVaultRootURL()
-            vaultStatus = VaultStatus(displayText: url.path, isConfigured: true)
-        } catch {
-            vaultStatus = VaultStatus(displayText: "Not selected", isConfigured: false)
+        vaultStatusTask?.cancel()
+        let access = vaultAccess
+        vaultStatusTask = Task { [weak self] in
+            let status: VaultStatus
+            do {
+                let url = try await access.resolveVaultRootURL(timeout: .seconds(2))
+                status = VaultStatus(displayText: url.path, isConfigured: true)
+            } catch {
+                status = VaultStatus(displayText: "Not selected", isConfigured: false)
+            }
+
+            guard !Task.isCancelled else { return }
+            self?.vaultStatus = status
         }
     }
 
@@ -1595,6 +1605,40 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
     }
 
+
+
+    // MARK: - Workspace continuity
+
+    func workspaceContinuitySnapshot() -> WorkspaceContinuitySnapshot {
+        WorkspaceContinuitySnapshot(
+            isRecordingActive: captureState == .recording,
+            pipelineStage: state.statusLabel,
+            activeSessionID: currentSessionID,
+            unsavedWorkPresent: hasActiveSessionContext
+        )
+    }
+
+    func workspaceDidBecomeVisible() {
+        refreshVaultStatus()
+    }
+
+    private var currentSessionID: String? {
+        switch state {
+        case .recording(let session):
+            return session.id.uuidString
+        default:
+            return nil
+        }
+    }
+
+    private var hasActiveSessionContext: Bool {
+        switch state {
+        case .recording, .recorded, .processing, .writing:
+            return true
+        case .done, .failed, .idle, .importing:
+            return false
+        }
+    }
     // MARK: - UI helpers
 
     func revealInFinder(_ url: URL) {

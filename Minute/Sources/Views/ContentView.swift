@@ -8,7 +8,6 @@
 import MinuteCore
 import SwiftUI
 
-
 struct ContentView: View {
     @EnvironmentObject private var appState: AppNavigationModel
     @StateObject private var onboardingModel = OnboardingViewModel()
@@ -32,17 +31,24 @@ struct ContentView: View {
         if onboardingModel.isComplete {
             ZStack {
                 PipelineContentView()
+                    .opacity(appState.mainContent == .pipeline ? 1 : 0)
+                    .allowsHitTesting(appState.mainContent == .pipeline)
+                    .accessibilityHidden(appState.mainContent != .pipeline)
 
-                if appState.mainContent == .settings {
-                    SettingsOverlayView()
-                }
+                MainSettingsView()
+                    .opacity(appState.mainContent == .settings ? 1 : 0)
+                    .allowsHitTesting(appState.mainContent == .settings)
+                    .accessibilityHidden(appState.mainContent != .settings)
             }
+            .animation(.easeInOut(duration: 0.15), value: appState.mainContent)
         } else {
             OnboardingView(model: onboardingModel)
         }
     }
 }
+
 #Preview(traits: .fixedLayout(width: 1024, height: 800)) {
-    PipelineContentView()
+    ContentView()
         .environmentObject(AppNavigationModel())
+        .environmentObject(UpdaterViewModel.preview)
 }

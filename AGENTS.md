@@ -153,6 +153,8 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
 - Local files only (existing vault outputs and temporary recording session directory), plus session-scoped event history in memory for stop rationale (010-silence-auto-stop)
 - Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components (011-vocabulary-boosting)
 - Local app settings persistence for global vocabulary config + session-scoped in-memory override state; no new vault output files (011-vocabulary-boosting)
+- Swift (SwiftUI app target, Swift package modules) + SwiftUI, AppKit, Combine, MinuteCore, existing settings view models/services (012-settings-improvements)
+- Existing local settings persistence (`UserDefaults` + local file-backed app state where already used); no new storage systems (012-settings-improvements)
 
 ## Recent Changes
 - 011-vocabulary-boosting: Added Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components

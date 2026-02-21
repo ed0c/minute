@@ -66,6 +66,7 @@ final class OnboardingViewModel: ObservableObject {
     private var defaultsObserver: AnyCancellable?
     private var modelTask: Task<Void, Never>?
     private var modelsValidationTask: Task<Void, Never>?
+    private var vaultStatusTask: Task<Void, Never>?
 
     private enum DefaultsKey {
         static let didShowIntro = "didShowOnboardingIntro"
@@ -135,6 +136,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     deinit {
+        vaultStatusTask?.cancel()
         modelTask?.cancel()
         modelsValidationTask?.cancel()
     }
@@ -299,14 +301,21 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private func refreshVaultStatus() {
-        do {
-            _ = try vaultAccess.resolveVaultRootURL()
-            vaultConfigured = true
-        } catch {
-            vaultConfigured = false
-        }
+        vaultStatusTask?.cancel()
+        let access = vaultAccess
+        vaultStatusTask = Task { [weak self] in
+            let isConfigured: Bool
+            do {
+                _ = try await access.resolveVaultRootURL(timeout: .seconds(2))
+                isConfigured = true
+            } catch {
+                isConfigured = false
+            }
 
-        updateCurrentStepIfNeeded()
+            guard !Task.isCancelled else { return }
+            self?.vaultConfigured = isConfigured
+            self?.updateCurrentStepIfNeeded()
+        }
     }
 
     private func refreshModelsStatus() async {

@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PipelineContentView: View {
+    @EnvironmentObject private var appState: AppNavigationModel
     @StateObject private var model = MeetingPipelineViewModel.live()
     @StateObject private var notesModel = MeetingNotesBrowserViewModel()
 
@@ -117,6 +118,11 @@ struct PipelineContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .minuteRecordingAlertShowPipeline)) { _ in
                 notesModel.dismissOverlay()
+            }
+            .onReceive(appState.$mainContent.removeDuplicates()) { mainContent in
+                if mainContent == .pipeline {
+                    model.workspaceDidBecomeVisible()
+                }
             }
         }
     }

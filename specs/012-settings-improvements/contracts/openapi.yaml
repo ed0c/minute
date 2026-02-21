@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: Minute Settings Workspace Contract
+  version: 0.1.0
+  description: |
+    Planning-time contract for single-window settings workspace routing,
+    category navigation, and continuity guarantees for active recording/work.
+servers:
+  - url: local://minute
+paths:
+  /v1/workspace:
+    get:
+      summary: Get current workspace route state
+      operationId: getWorkspaceState
+      responses:
+        '200':
+          description: Current active workspace and selection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceStateResponse'
+
+  /v1/workspace/active:
+    put:
+      summary: Switch active workspace in existing main window
+      operationId: setActiveWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetActiveWorkspaceRequest'
+      responses:
+        '200':
+          description: Workspace switched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceStateResponse'
+        '409':
+          description: Invalid transition due to continuity guard failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContinuityError'
+
+  /v1/settings/categories:
+    get:
+      summary: List visible settings categories for sidebar
+      operationId: listSettingsCategories
+      responses:
+        '200':
+          description: Ordered settings categories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsCategoryListResponse'
+
+  /v1/settings/categories/{categoryId}/select:
+    put:
+      summary: Select active settings category
+      operationId: selectSettingsCategory
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '200':
+          description: Category selected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceStateResponse'
+        '404':
+          description: Category not found or not visible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /v1/workspace/continuity:
+    get:
+      summary: Get continuity snapshot for active recording/work
+      operationId: getContinuitySnapshot
+      responses:
+        '200':
+          description: Current continuity state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkContinuitySnapshot'
+
+components:
+  parameters:
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Workspace:
+      type: string
+      enum: [pipeline, settings]
+
+    SettingsCategory:
+      type: object
+      required: [id, title, sortOrder, isVisible]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+        sortOrder:
+          type: integer
+          minimum: 0
+        isVisible:
+          type: boolean
+        description:
+          type: string
+
+    SettingsCategoryListResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettingsCategory'
+
+    WorkspaceStateResponse:
+      type: object
+      required: [activeWorkspace, selectedCategoryId, windowMode, guarantees]
+      properties:
+        activeWorkspace:
+          $ref: '#/components/schemas/Workspace'
+        selectedCategoryId:
+          type: string
+          nullable: true
+        windowMode:
+          type: string
+          enum: [single_window]
+        guarantees:
+          type: object
+          required: [noAdditionalWindow, continuityPreserved]
+          properties:
+            noAdditionalWindow:
+              type: boolean
+            continuityPreserved:
+              type: boolean
+
+    SetActiveWorkspaceRequest:
+      type: object
+      required: [workspace]
+      properties:
+        workspace:
+          $ref: '#/components/schemas/Workspace'
+
+    WorkContinuitySnapshot:
+      type: object
+      required: [isRecordingActive, pipelineStage, unsavedWorkPresent]
+      properties:
+        isRecordingActive:
+          type: boolean
+        pipelineStage:
+          type: string
+        activeSessionId:
+          type: string
+          nullable: true
+        unsavedWorkPresent:
+          type: boolean
+
+    ContinuityError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [continuity_violation]
+        message:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [category_not_found, category_not_visible, invalid_workspace]
+        message:
+          type: string

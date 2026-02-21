@@ -4,22 +4,27 @@ import Testing
 
 struct UpdaterProfileBehaviorTests {
     @Test
+    @MainActor
     func settingsSections_hideUpdatesWhenUpdaterDisabled() {
-        let sections = SettingsSection.visibleCases(updatesEnabled: false)
+        let sections = SettingsCategoryCatalog.categories(updatesEnabled: false)
+        let ids = Set(sections.map { $0.id })
 
-        #expect(sections.contains(.general))
-        #expect(sections.contains(.ai))
-        #expect(sections.contains(.updates) == false)
+        #expect(ids.contains(.general))
+        #expect(ids.contains(.ai))
+        #expect(ids.contains(.updates) == false)
     }
 
     @Test
+    @MainActor
     func settingsSections_includeUpdatesWhenUpdaterEnabled() {
-        let sections = SettingsSection.visibleCases(updatesEnabled: true)
+        let sections = SettingsCategoryCatalog.categories(updatesEnabled: true)
+        let ids = Set(sections.map { $0.id })
 
-        #expect(sections.contains(.updates))
+        #expect(ids.contains(.updates))
     }
 
     @Test
+    @MainActor
     func distributionConfig_readsProfileAndUpdaterFlagFromInfoPlist() throws {
         let bundleURL = try makeTestBundle(info: [
             "MINUTEDistributionProfile": "app-store",

@@ -1,17 +1,10 @@
-import AppKit
 import SwiftUI
 
+/// Deprecated compatibility wrapper.
+/// Settings now render as a full-window workspace in `ContentView`.
 struct SettingsOverlayView: View {
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.25)
-                .ignoresSafeArea()
-
-            MainSettingsView()
-                .frame(width: 680, height: 480)
-                .minutePanelStyle()
-        }
-        .transition(.opacity)
+        MainSettingsView()
     }
 }
 
