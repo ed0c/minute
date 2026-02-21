@@ -522,6 +522,7 @@ private struct InteractiveTranscriptView: View {
                     case .speakerHeader(let header):
                         SpeakerHeaderRow(
                             header: header,
+                            speakerColor: TranscriptSpeakerColorResolver.color(for: header.speakerId),
                             currentDisplayName: {
                                 let trimmed = speakerName(header.speakerId)
                                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -565,6 +566,27 @@ private struct InteractiveTranscriptView: View {
 private enum TranscriptLine: Equatable {
     case speakerHeader(TranscriptSpeakerHeader)
     case text(String)
+}
+
+enum TranscriptSpeakerColorResolver {
+    static func color(for speakerID: Int) -> Color {
+        let hue = CGFloat(TranscriptSpeakerHueResolver.hue(for: speakerID))
+        return Color(nsColor: NSColor(name: NSColor.Name("minute.speaker.\(speakerID)")) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let saturation: CGFloat = isDark ? 0.70 : 0.74
+            let brightness: CGFloat = isDark ? 0.90 : 0.50
+            return NSColor(calibratedHue: hue, saturation: saturation, brightness: brightness, alpha: 1)
+        })
+    }
+}
+
+enum TranscriptSpeakerHueResolver {
+    nonisolated static func hue(for speakerID: Int) -> Double {
+        let goldenRatioConjugate = 0.618_033_988_749_895
+        let normalizedSpeakerID = max(0, speakerID - 1)
+        let hue = Double(normalizedSpeakerID) * goldenRatioConjugate
+        return hue.truncatingRemainder(dividingBy: 1)
+    }
 }
 
 private struct TranscriptSpeakerHeader: Equatable {
@@ -665,6 +687,7 @@ private enum TranscriptLineParser {
 
 private struct SpeakerHeaderRow: View {
     let header: TranscriptSpeakerHeader
+    let speakerColor: Color
     let currentDisplayName: String?
     let knownProfileNames: [String]
     let onPickName: (String) -> Void
@@ -683,7 +706,7 @@ private struct SpeakerHeaderRow: View {
             } label: {
                 Text(currentDisplayName ?? "Speaker \(header.speakerId)")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(speakerColor)
             }
             .buttonStyle(.link)
             .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
