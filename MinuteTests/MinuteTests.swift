@@ -238,11 +238,6 @@ struct OnboardingPersistenceCoverageTests {
 struct ResilientWhisperTranscriptionServiceTests {
     @Test
     func transcribe_whenPrimaryReturnsPermissionDenied_fallsBackToSecondary() async throws {
-        let suite = "ResilientWhisperTranscriptionServiceTests.permission.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
         let fallbackResult = TranscriptionResult(
             text: "fallback transcript",
             segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "fallback transcript")]
@@ -256,9 +251,7 @@ struct ResilientWhisperTranscriptionServiceTests {
                     )
                 )
             ),
-            fallback: StubTranscriptionService(result: .success(fallbackResult)),
-            defaults: defaults,
-            currentAppVersion: "test-version"
+            fallback: StubTranscriptionService(result: .success(fallbackResult))
         )
 
         let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
@@ -271,11 +264,6 @@ struct ResilientWhisperTranscriptionServiceTests {
 
     @Test
     func transcribe_whenPrimaryReturnsNonPermissionFailure_doesNotFallback() async throws {
-        let suite = "ResilientWhisperTranscriptionServiceTests.non-permission.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
         let expected = MinuteError.whisperFailed(exitCode: 12, output: "decoder failed")
         let service = ResilientWhisperTranscriptionService(
             primary: StubTranscriptionService(result: .failure(expected)),
@@ -283,9 +271,7 @@ struct ResilientWhisperTranscriptionServiceTests {
                 result: .success(
                     TranscriptionResult(text: "unused", segments: [])
                 )
-            ),
-            defaults: defaults,
-            currentAppVersion: "test-version"
+            )
         )
 
         let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
@@ -309,12 +295,7 @@ struct ResilientWhisperTranscriptionServiceTests {
     }
 
     @Test
-    func transcribe_afterXPCFailure_disablesPrimaryForCurrentVersion() async throws {
-        let suite = "ResilientWhisperTranscriptionServiceTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
+    func transcribe_afterXPCFailure_disablesPrimaryForCurrentServiceInstance() async throws {
         let primary = CountingTranscriptionService(
             result: .failure(MinuteError.whisperFailed(exitCode: -1, output: "xpc failure"))
         )
@@ -323,9 +304,7 @@ struct ResilientWhisperTranscriptionServiceTests {
 
         let first = ResilientWhisperTranscriptionService(
             primary: primary,
-            fallback: fallback,
-            defaults: defaults,
-            currentAppVersion: "0.18-test"
+            fallback: fallback
         )
 
         let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
@@ -343,8 +322,7 @@ struct ResilientWhisperTranscriptionServiceTests {
         let second = ResilientWhisperTranscriptionService(
             primary: primaryAfterDisable,
             fallback: fallbackAfterDisable,
-            defaults: defaults,
-            currentAppVersion: "0.18-test"
+            primaryEnabled: false
         )
 
         let secondResult = try await second.transcribe(wavURL: wavURL)
@@ -353,50 +331,6 @@ struct ResilientWhisperTranscriptionServiceTests {
         #expect(await fallbackAfterDisable.callCount == 1)
     }
 
-    @Test
-    func transcribe_afterXPCFailure_staysDisabledAcrossAppVersionChange() async throws {
-        let suite = "ResilientWhisperTranscriptionServiceTests.version-persist.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let failingPrimary = CountingTranscriptionService(
-            result: .failure(MinuteError.whisperFailed(exitCode: -1, output: "xpc connection interrupted"))
-        )
-        let fallbackResult = TranscriptionResult(text: "fallback transcript", segments: [])
-        let fallback = CountingTranscriptionService(result: .success(fallbackResult))
-
-        let first = ResilientWhisperTranscriptionService(
-            primary: failingPrimary,
-            fallback: fallback,
-            defaults: defaults,
-            currentAppVersion: "0.18-test"
-        )
-
-        let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
-        defer { try? FileManager.default.removeItem(at: wavURL) }
-        try Data([0x00]).write(to: wavURL, options: [.atomic])
-
-        _ = try await first.transcribe(wavURL: wavURL)
-        #expect(await failingPrimary.callCount == 1)
-        #expect(await fallback.callCount == 1)
-
-        let primaryAfterUpdate = CountingTranscriptionService(
-            result: .success(TranscriptionResult(text: "xpc transcript", segments: []))
-        )
-        let fallbackAfterUpdate = CountingTranscriptionService(result: .success(fallbackResult))
-        let second = ResilientWhisperTranscriptionService(
-            primary: primaryAfterUpdate,
-            fallback: fallbackAfterUpdate,
-            defaults: defaults,
-            currentAppVersion: "0.19-test"
-        )
-
-        let resultAfterUpdate = try await second.transcribe(wavURL: wavURL)
-        #expect(resultAfterUpdate == fallbackResult)
-        #expect(await primaryAfterUpdate.callCount == 0)
-        #expect(await fallbackAfterUpdate.callCount == 1)
-    }
 }
 
 private actor CountingTranscriptionService: TranscriptionServicing {

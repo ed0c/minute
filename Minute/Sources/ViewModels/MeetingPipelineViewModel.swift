@@ -1696,58 +1696,41 @@ private struct FailingTranscriptionService: TranscriptionServicing {
 }
 
 final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unchecked Sendable {
-    private static let disabledXPCDefaultsKey = "minute.whisper.xpc.disabled"
-    private static let legacyDisabledXPCVersionDefaultsKey = "minute.whisper.xpc.disabled.version"
     private static let xpcOptInEnvironmentKey = "MINUTE_ENABLE_WHISPER_XPC"
 
     private let primary: any TranscriptionServicing
     private let fallback: any TranscriptionServicing
-    private let defaults: UserDefaults
-    private let currentAppVersion: String
     private let stateLock = NSLock()
-    private var xpcDisabled: Bool
+    private var primaryDisabled: Bool
     private let logger = Logger(subsystem: "roblibob.Minute", category: "whisper-resilience")
 
     init(
         primary: any TranscriptionServicing,
         fallback: any TranscriptionServicing,
-        defaults: UserDefaults = .standard,
-        xpcEnabledByConfiguration: Bool = true,
-        currentAppVersion: String = ResilientWhisperTranscriptionService.resolveCurrentAppVersion()
+        primaryEnabled: Bool = true
     ) {
         self.primary = primary
         self.fallback = fallback
-        self.defaults = defaults
-        self.currentAppVersion = currentAppVersion
-        let legacyDisabledVersion = defaults.string(forKey: Self.legacyDisabledXPCVersionDefaultsKey)
-        self.xpcDisabled =
-            defaults.bool(forKey: Self.disabledXPCDefaultsKey)
-            || legacyDisabledVersion == currentAppVersion
-            || !xpcEnabledByConfiguration
+        self.primaryDisabled = !primaryEnabled
     }
 
     static func liveDefault() -> ResilientWhisperTranscriptionService {
+        let inProcess = WhisperLibraryTranscriptionService.liveDefault()
+#if DEBUG
         let xpcOptInEnabled = ProcessInfo.processInfo.environment[Self.xpcOptInEnvironmentKey] == "1"
-        if !xpcOptInEnabled {
-            let inProcess = WhisperLibraryTranscriptionService.liveDefault()
+        if xpcOptInEnabled {
             return ResilientWhisperTranscriptionService(
-                primary: inProcess,
+                primary: WhisperXPCTranscriptionService.liveDefault(),
                 fallback: inProcess,
-                defaults: .standard,
-                xpcEnabledByConfiguration: false
+                primaryEnabled: true
             )
         }
-
-        return ResilientWhisperTranscriptionService(
-            primary: WhisperXPCTranscriptionService.liveDefault(),
-            fallback: WhisperLibraryTranscriptionService.liveDefault(),
-            defaults: .standard,
-            xpcEnabledByConfiguration: true
-        )
+#endif
+        return ResilientWhisperTranscriptionService(primary: inProcess, fallback: inProcess, primaryEnabled: false)
     }
 
     func transcribe(wavURL: URL) async throws -> TranscriptionResult {
-        if isXPCDisabled() {
+        if isPrimaryDisabled() {
             return try await fallback.transcribe(wavURL: wavURL)
         }
 
@@ -1758,35 +1741,26 @@ final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unche
                 throw error
             }
 
-            disableXPC()
+            disablePrimary()
             logger.error("Whisper XPC failed; retrying in-process whisper. reason=\(ErrorHandler.debugMessage(for: error), privacy: .public)")
             return try await fallback.transcribe(wavURL: wavURL)
         }
     }
 
-    private static func resolveCurrentAppVersion() -> String {
-        let info = Bundle.main.infoDictionary
-        let shortVersion = (info?["CFBundleShortVersionString"] as? String) ?? "0"
-        let buildVersion = (info?["CFBundleVersion"] as? String) ?? "0"
-        return "\(shortVersion)-\(buildVersion)"
-    }
-
-    private func isXPCDisabled() -> Bool {
+    private func isPrimaryDisabled() -> Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return xpcDisabled
+        return primaryDisabled
     }
 
-    private func disableXPC() {
+    private func disablePrimary() {
         stateLock.lock()
-        if xpcDisabled {
+        if primaryDisabled {
             stateLock.unlock()
             return
         }
-        xpcDisabled = true
+        primaryDisabled = true
         stateLock.unlock()
-        defaults.set(true, forKey: Self.disabledXPCDefaultsKey)
-        defaults.set(currentAppVersion, forKey: Self.legacyDisabledXPCVersionDefaultsKey)
     }
 
     private func shouldFallbackToInProcessWhisper(for error: Error) -> Bool {
