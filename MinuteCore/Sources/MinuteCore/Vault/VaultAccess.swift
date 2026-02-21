@@ -5,8 +5,14 @@ public struct VaultAccess {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<URL, Error>?
 
-        init(_ continuation: CheckedContinuation<URL, Error>) {
+        init(_ continuation: CheckedContinuation<URL, Error>? = nil) {
             self.continuation = continuation
+        }
+
+        func set(_ continuation: CheckedContinuation<URL, Error>) {
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
         }
 
         func resume(with result: Result<URL, Error>) {
@@ -21,6 +27,25 @@ public struct VaultAccess {
         }
     }
 
+    private final class TimeoutTaskBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
+
+        func set(_ task: Task<Void, Never>) {
+            lock.lock()
+            self.task = task
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            let task = self.task
+            self.task = nil
+            lock.unlock()
+            task?.cancel()
+        }
+    }
+
     private let bookmarkStore: any VaultBookmarkStoring
 
     public init(bookmarkStore: some VaultBookmarkStoring) {
@@ -32,7 +57,7 @@ public struct VaultAccess {
             throw MinuteError.vaultUnavailable
         }
 
-        return try Self.resolveVaultRootURL(fromBookmark: bookmark, timeout: .seconds(2))
+        return try Self.resolveVaultRootURL(fromBookmark: bookmark)
     }
 
     public func resolveVaultRootURL(timeout: Duration) async throws -> URL {
@@ -40,47 +65,32 @@ public struct VaultAccess {
             throw MinuteError.vaultUnavailable
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let continuationBox = ResolutionContinuationBox(continuation)
+        let continuationBox = ResolutionContinuationBox()
+        let timeoutTaskBox = TimeoutTaskBox()
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuationBox.resume(with: Result {
-                    try Self.resolveVaultRootURL(fromBookmark: bookmark)
-                })
+        return try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+
+            return try await withCheckedThrowingContinuation { continuation in
+                continuationBox.set(continuation)
+
+                let timeoutTask = Task.detached(priority: .userInitiated) {
+                    try? await Task.sleep(for: timeout)
+                    continuationBox.resume(with: .failure(MinuteError.vaultUnavailable))
+                }
+                timeoutTaskBox.set(timeoutTask)
+
+                DispatchQueue.global(qos: .userInitiated).async {
+                    continuationBox.resume(with: Result {
+                        try Self.resolveVaultRootURL(fromBookmark: bookmark)
+                    })
+                    timeoutTaskBox.cancel()
+                }
             }
-
-            Task.detached(priority: .userInitiated) {
-                try? await Task.sleep(for: timeout)
-                continuationBox.resume(with: .failure(MinuteError.vaultUnavailable))
-            }
-        }
-    }
-
-    private static func resolveVaultRootURL(fromBookmark bookmark: Data, timeout: DispatchTimeInterval) throws -> URL {
-        let semaphore = DispatchSemaphore(value: 0)
-        let lock = NSLock()
-        var result: Result<URL, Error>?
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let resolved = Result {
-                try Self.resolveVaultRootURL(fromBookmark: bookmark)
-            }
-            lock.lock()
-            result = resolved
-            lock.unlock()
-            semaphore.signal()
-        }
-
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw MinuteError.vaultUnavailable
-        }
-
-        lock.lock()
-        defer { lock.unlock() }
-        guard let result else {
-            throw MinuteError.vaultUnavailable
-        }
-        return try result.get()
+        }, onCancel: {
+            timeoutTaskBox.cancel()
+            continuationBox.resume(with: .failure(CancellationError()))
+        })
     }
 
     private static func resolveVaultRootURL(fromBookmark bookmark: Data) throws -> URL {

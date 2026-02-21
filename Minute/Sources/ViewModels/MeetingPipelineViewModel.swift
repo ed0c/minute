@@ -186,6 +186,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private var processingTask: Task<Void, Never>?
     private var backgroundProcessingObserverTask: Task<Void, Never>?
     private var vaultStatusTask: Task<Void, Never>?
+    private var isPreparingPipelineContext = false
     private var lastAudioLevelUpdate: CFTimeInterval = 0
     private var screenContextEvents: [ScreenContextEvent] = []
     private var screenCaptureSelection: ScreenContextWindowSelection?
@@ -825,7 +826,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                 await clearActiveRecordingWarnings()
                 silenceStatus = SilenceStatusSnapshot()
 
-                guard let context = makePipelineContext(
+                guard let context = await makePipelineContext(
                     audioTempURL: result.wavURL,
                     audioDurationSeconds: result.duration,
                     startedAt: session.startedAt,
@@ -952,28 +953,36 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     private func processIfAllowed() {
+        guard !isPreparingPipelineContext else { return }
         guard case .recorded(let audioTempURL, let durationSeconds, let startedAt, let stoppedAt) = state else { return }
 
-        // Snapshot vault configuration.
-        guard let context = makePipelineContext(
-            audioTempURL: audioTempURL,
-            audioDurationSeconds: durationSeconds,
-            startedAt: startedAt,
-            stoppedAt: stoppedAt,
-            screenContextEvents: screenContextEvents
-        ) else {
-            state = .failed(error: .vaultUnavailable, debugOutput: nil)
-            return
-        }
+        isPreparingPipelineContext = true
 
-        // One active task at a time.
-        processingTask?.cancel()
-        progress = 0
-        state = .processing(stage: .downloadingModels, context: context)
-
-        processingTask = Task(priority: .utility) { [weak self] in
+        Task { [weak self] in
             guard let self else { return }
-            await self.runPipeline(context: context)
+            defer { self.isPreparingPipelineContext = false }
+
+            // Snapshot vault configuration.
+            guard let context = await makePipelineContext(
+                audioTempURL: audioTempURL,
+                audioDurationSeconds: durationSeconds,
+                startedAt: startedAt,
+                stoppedAt: stoppedAt,
+                screenContextEvents: screenContextEvents
+            ) else {
+                state = .failed(error: .vaultUnavailable, debugOutput: nil)
+                return
+            }
+
+            // One active task at a time.
+            processingTask?.cancel()
+            progress = 0
+            state = .processing(stage: .downloadingModels, context: context)
+
+            processingTask = Task(priority: .utility) { [weak self] in
+                guard let self else { return }
+                await self.runPipeline(context: context)
+            }
         }
     }
 
@@ -1421,12 +1430,12 @@ final class MeetingPipelineViewModel: ObservableObject {
         startedAt: Date,
         stoppedAt: Date,
         screenContextEvents: [ScreenContextEvent]
-    ) -> PipelineContext? {
+    ) async -> PipelineContext? {
         let configuration = AppConfiguration()
 
         // Validate vault selection.
         do {
-            _ = try vaultAccess.resolveVaultRootURL()
+            _ = try await vaultAccess.resolveVaultRootURL(timeout: .seconds(2))
         } catch {
             return nil
         }
