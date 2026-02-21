@@ -34,32 +34,41 @@ struct MainSettingsView: View {
             settingsHeader
 
             Group {
-                switch currentSelection {
-                case .general:
-                    Form {
-                        GeneralSettingsSection()
-                        ScreenContextSettingsSection()
+                if let currentSelection {
+                    switch currentSelection {
+                    case .general:
+                        Form {
+                            GeneralSettingsSection()
+                            ScreenContextSettingsSection()
+                        }
+                    case .storage:
+                        Form {
+                            VaultConfigurationView(model: vaultModel, style: .settings)
+                        }
+                    case .speakers:
+                        Form {
+                            KnownSpeakersSettingsSection(mode: .manage)
+                        }
+                    case .privacy:
+                        Form {
+                            PermissionsSettingsSection()
+                        }
+                    case .ai:
+                        Form {
+                            ModelsSettingsSection(model: modelsModel)
+                        }
+                    case .updates:
+                        Form {
+                            UpdatesSettingsSection(model: updaterViewModel)
+                        }
                     }
-                case .storage:
-                    Form {
-                        VaultConfigurationView(model: vaultModel, style: .settings)
-                    }
-                case .speakers:
-                    Form {
-                        KnownSpeakersSettingsSection(mode: .manage)
-                    }
-                case .privacy:
-                    Form {
-                        PermissionsSettingsSection()
-                    }
-                case .ai:
-                    Form {
-                        ModelsSettingsSection(model: modelsModel)
-                    }
-                case .updates:
-                    Form {
-                        UpdatesSettingsSection(model: updaterViewModel)
-                    }
+                } else {
+                    ContentUnavailableView(
+                        "Settings unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("No settings categories are currently available.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
             .formStyle(.grouped)
@@ -88,10 +97,10 @@ struct MainSettingsView: View {
     private var settingsHeader: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(currentCategoryDefinition.title)
+                Text(currentCategoryDefinition?.title ?? "Settings")
                     .font(.title3.bold())
 
-                Text(currentCategoryDefinition.description)
+                Text(currentCategoryDefinition?.description ?? "Adjust app preferences and behavior.")
                     .minuteCaption()
             }
 
@@ -116,13 +125,13 @@ struct MainSettingsView: View {
         SettingsCategoryCatalog.categories(updatesEnabled: updaterViewModel.isUpdaterEnabled)
     }
 
-    private var currentSelection: SettingsCategoryDefinition.ID {
-        resolvedSelection(candidate: selection) ?? .general
+    private var currentSelection: SettingsCategoryDefinition.ID? {
+        resolvedSelection(candidate: selection)
     }
 
-    private var currentCategoryDefinition: SettingsCategoryDefinition {
-        availableCategories.first(where: { $0.id == currentSelection })
-            ?? SettingsCategoryCatalog.categories(updatesEnabled: updaterViewModel.isUpdaterEnabled).first!
+    private var currentCategoryDefinition: SettingsCategoryDefinition? {
+        guard let currentSelection else { return nil }
+        return availableCategories.first(where: { $0.id == currentSelection })
     }
 
     private func resolvedSelection(candidate: SettingsCategoryDefinition.ID?) -> SettingsCategoryDefinition.ID? {
