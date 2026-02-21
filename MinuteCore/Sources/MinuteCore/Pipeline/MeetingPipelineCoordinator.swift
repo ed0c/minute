@@ -46,6 +46,7 @@ public actor MeetingPipelineCoordinator {
         do {
             var context = context
             try Task.checkCancellation()
+            await attemptRecoverMissingContractAudioIfNeeded(context: context)
 
             progress?(.downloadingModels(fractionCompleted: 0))
             try await modelManager.ensureModelsPresent { update in
@@ -183,7 +184,8 @@ public actor MeetingPipelineCoordinator {
             throw CancellationError()
         } catch {
             logger.error("Pipeline failed: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
-            cleanupTemporaryArtifacts(for: context)
+            // Keep capture audio on failures so retry can reuse the same context safely.
+            cleanupTemporaryArtifacts(for: context, policy: .workingDirectoryOnly)
             throw error
         }
     }
@@ -567,14 +569,59 @@ public actor MeetingPipelineCoordinator {
         return result
     }
 
-    private func cleanupTemporaryArtifacts(for context: PipelineContext) {
+    private func attemptRecoverMissingContractAudioIfNeeded(context: PipelineContext) async {
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: context.audioTempURL.path) else { return }
+        guard context.audioTempURL.lastPathComponent.lowercased() == "contract.wav" else { return }
+
+        let sessionURL = context.audioTempURL.deletingLastPathComponent()
+        let captureURL = sessionURL.appendingPathComponent("capture.caf")
+        let systemURL = sessionURL.appendingPathComponent("system.caf")
+        let hasCapture = fileManager.fileExists(atPath: captureURL.path)
+
+        guard hasCapture else { return }
+
+        let hasSystem = fileManager.fileExists(atPath: systemURL.path)
+        logger.info("Audio input missing; attempting to rebuild contract WAV for \(sessionURL.lastPathComponent, privacy: .private(mask: .hash))")
+
+        do {
+            if hasSystem {
+                try await AudioWavMixer.mixToContractWav(
+                    micURL: captureURL,
+                    systemURL: systemURL,
+                    outputURL: context.audioTempURL
+                )
+            } else {
+                try await AudioWavConverter.convertToContractWav(
+                    inputURL: captureURL,
+                    outputURL: context.audioTempURL
+                )
+            }
+            try ContractWavVerifier.verifyContractWav(at: context.audioTempURL)
+            logger.info("Recovered missing contract WAV for \(sessionURL.lastPathComponent, privacy: .private(mask: .hash))")
+        } catch {
+            logger.error("Failed to recover missing contract WAV: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
+        }
+    }
+
+    private enum ArtifactCleanupPolicy {
+        case all
+        case workingDirectoryOnly
+    }
+
+    private func cleanupTemporaryArtifacts(
+        for context: PipelineContext,
+        policy: ArtifactCleanupPolicy = .all
+    ) {
         let fileManager = FileManager.default
         let tempRootURL = fileManager.temporaryDirectory.standardizedFileURL
         let tempRootPath = tempRootURL.path.hasSuffix("/") ? tempRootURL.path : tempRootURL.path + "/"
 
-        let audioTempDir = context.audioTempURL.deletingLastPathComponent().standardizedFileURL.path
-        if audioTempDir.hasPrefix(tempRootPath) {
-            try? fileManager.removeItem(atPath: audioTempDir)
+        if policy == .all {
+            let audioTempDir = context.audioTempURL.deletingLastPathComponent().standardizedFileURL.path
+            if audioTempDir.hasPrefix(tempRootPath) {
+                try? fileManager.removeItem(atPath: audioTempDir)
+            }
         }
 
         let workingDir = context.workingDirectoryURL.standardizedFileURL.path

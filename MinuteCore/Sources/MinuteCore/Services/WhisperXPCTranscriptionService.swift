@@ -65,6 +65,8 @@ public final class WhisperXPCTranscriptionService: TranscriptionServicing, @unch
     }
 
     public func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        let wavData = try Self.loadWavDataForXPC(sourceURL: wavURL)
+
         return try await withCheckedThrowingContinuation { continuation in
             let lock = NSLock()
             var finished = false
@@ -95,7 +97,7 @@ public final class WhisperXPCTranscriptionService: TranscriptionServicing, @unch
             let modelURL = modelURLProvider()
 
             remote.transcribe(
-                wavPath: wavURL.path,
+                wavData: wavData,
                 modelPath: modelURL.path,
                 detectLanguage: configuration.detectLanguage,
                 language: configuration.language,
@@ -126,5 +128,13 @@ public final class WhisperXPCTranscriptionService: TranscriptionServicing, @unch
                 }
             }
         }
+    }
+
+    static func loadWavDataForXPC(
+        sourceURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> Data {
+        _ = fileManager
+        return try Data(contentsOf: sourceURL)
     }
 }

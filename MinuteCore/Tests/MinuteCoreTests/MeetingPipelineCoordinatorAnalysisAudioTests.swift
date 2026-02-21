@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import Foundation
 import Testing
 @testable import MinuteCore
@@ -77,6 +78,83 @@ struct MeetingPipelineCoordinatorAnalysisAudioTests {
         #expect(usedForTranscription == .some(context.audioTempURL))
         #expect(usedForDiarization == .some(context.audioTempURL))
     }
+
+    @Test
+    func execute_whenPipelineFails_preservesAudioArtifactsForRetry() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let transcription = FailingTranscriptionService(
+            failure: .transcriptionFailed(underlyingDescription: "forced test failure")
+        )
+        let diarization = CapturingDiarizationService(segments: [])
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            diarizationService: diarization,
+            transcriptionService: transcription,
+            summarizationJSON: validExtractionJSON(title: "Weekly Sync", date: "2025-01-12"),
+            repairJSON: validExtractionJSON(title: "Weekly Sync", date: "2025-01-12"),
+            audioLoudnessNormalizer: NoOpAudioLoudnessNormalizer()
+        )
+
+        let context = try makePipelineContext(saveAudio: true, saveTranscript: false)
+        defer { try? FileManager.default.removeItem(at: context.audioTempURL.deletingLastPathComponent()) }
+
+        try FileManager.default.createDirectory(at: context.workingDirectoryURL, withIntermediateDirectories: true)
+        let workingSentinelURL = context.workingDirectoryURL.appendingPathComponent("sentinel.txt")
+        try Data("x".utf8).write(to: workingSentinelURL, options: [.atomic])
+
+        do {
+            _ = try await coordinator.execute(context: context)
+            #expect(Bool(false), "Expected execute to fail for retry artifact test")
+        } catch {
+            // Expected.
+        }
+
+        #expect(FileManager.default.fileExists(atPath: context.audioTempURL.path))
+        #expect(!FileManager.default.fileExists(atPath: context.workingDirectoryURL.path))
+    }
+
+    @Test
+    func execute_whenContractWavMissing_rebuildsFromCaptureBeforeProcessing() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let sessionURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sessionURL) }
+
+        let captureURL = sessionURL.appendingPathComponent("capture.caf")
+        let missingContractURL = sessionURL.appendingPathComponent("contract.wav")
+        try writeTestCapture(to: captureURL, durationSeconds: 1.0)
+
+        let transcription = CapturingTranscriptionService(result: TranscriptionResult(
+            text: "Recovered",
+            segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "Recovered")]
+        ))
+        let diarization = CapturingDiarizationService(segments: [])
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            diarizationService: diarization,
+            transcriptionService: transcription,
+            summarizationJSON: validExtractionJSON(title: "Recovered Session", date: "2025-01-12"),
+            repairJSON: validExtractionJSON(title: "Recovered Session", date: "2025-01-12"),
+            audioLoudnessNormalizer: NoOpAudioLoudnessNormalizer()
+        )
+
+        var context = try makePipelineContext(saveAudio: true, saveTranscript: false)
+        context.audioTempURL = missingContractURL
+        context.analysisAudioURL = missingContractURL
+
+        let result = try await coordinator.execute(context: context)
+        #expect(result.audioURL != nil)
+        if let audioURL = result.audioURL {
+            #expect(FileManager.default.fileExists(atPath: audioURL.path))
+        }
+    }
 }
 
 private struct TestModelManager: ModelManaging {
@@ -106,6 +184,19 @@ private actor CapturingTranscriptionService: TranscriptionServicing {
     func transcribe(wavURL: URL) async throws -> TranscriptionResult {
         lastWavURL = wavURL
         return result
+    }
+}
+
+private actor FailingTranscriptionService: TranscriptionServicing {
+    let failure: MinuteError
+
+    init(failure: MinuteError) {
+        self.failure = failure
+    }
+
+    func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        _ = wavURL
+        throw failure
     }
 }
 
@@ -264,6 +355,61 @@ private func makeTemporaryAudioFile(directoryPrefix: String) throws -> URL {
     let fileURL = directory.appendingPathComponent("audio.wav")
     try Data([0x00, 0x01]).write(to: fileURL, options: [.atomic])
     return fileURL
+}
+
+private func writeTestCapture(to url: URL, durationSeconds: Double) throws {
+    let sampleRate: Double = 48_000
+    let frameCount = AVAudioFrameCount(sampleRate * durationSeconds)
+
+    let settings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ]
+
+    let file = try AVAudioFile(forWriting: url, settings: settings)
+    let format = file.processingFormat
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+        throw MinuteError.audioExportFailed
+    }
+    buffer.frameLength = frameCount
+
+    let frequency: Double = 440
+    let sampleRateHz = format.sampleRate
+
+    if format.isInterleaved {
+        let audioBufferList = buffer.audioBufferList.pointee
+        guard audioBufferList.mNumberBuffers == 1,
+              let mData = audioBufferList.mBuffers.mData
+        else {
+            throw MinuteError.audioExportFailed
+        }
+
+        let sampleCount = Int(frameCount) * Int(format.channelCount)
+        let ptr = mData.bindMemory(to: Float.self, capacity: sampleCount)
+
+        for frame in 0 ..< Int(frameCount) {
+            let t = Double(frame) / sampleRateHz
+            let value = Float(sin(2.0 * Double.pi * frequency * t) * 0.25)
+            ptr[frame] = value
+        }
+    } else {
+        guard let ch0 = buffer.floatChannelData?[0] else {
+            throw MinuteError.audioExportFailed
+        }
+
+        for frame in 0 ..< Int(frameCount) {
+            let t = Double(frame) / sampleRateHz
+            let value = Float(sin(2.0 * Double.pi * frequency * t) * 0.25)
+            ch0[frame] = value
+        }
+    }
+
+    try file.write(from: buffer)
 }
 
 private func validExtractionJSON(title: String, date: String) -> String {

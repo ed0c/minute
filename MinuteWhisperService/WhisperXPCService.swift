@@ -30,7 +30,7 @@ final class WhisperXPCService: NSObject, WhisperXPCTranscriptionProtocol {
     private let encoder = JSONEncoder()
 
     func transcribe(
-        wavPath: String,
+        wavData: Data,
         modelPath: String,
         detectLanguage: Bool,
         language: String,
@@ -40,7 +40,7 @@ final class WhisperXPCService: NSObject, WhisperXPCTranscriptionProtocol {
         Task {
             do {
                 let result = try await worker.transcribe(
-                    wavPath: wavPath,
+                    wavData: wavData,
                     modelPath: modelPath,
                     detectLanguage: detectLanguage,
                     language: language,
@@ -61,12 +61,19 @@ final class WhisperXPCService: NSObject, WhisperXPCTranscriptionProtocol {
 
 actor WhisperXPCWorker {
     func transcribe(
-        wavPath: String,
+        wavData: Data,
         modelPath: String,
         detectLanguage: Bool,
         language: String,
         threads: Int
     ) async throws -> WhisperXPCTranscriptionResult {
+        let inputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xpc-input-\(UUID().uuidString).wav")
+        try wavData.write(to: inputURL, options: [.atomic])
+        defer {
+            try? FileManager.default.removeItem(at: inputURL)
+        }
+
         let service = WhisperLibraryTranscriptionService(
             configuration: WhisperLibraryTranscriptionConfiguration(
                 modelURL: URL(fileURLWithPath: modelPath),
@@ -76,7 +83,7 @@ actor WhisperXPCWorker {
             )
         )
 
-        let result = try await service.transcribe(wavURL: URL(fileURLWithPath: wavPath))
+        let result = try await service.transcribe(wavURL: inputURL)
         let segments = result.segments.map { segment in
             WhisperXPCSegment(
                 startSeconds: segment.startSeconds,

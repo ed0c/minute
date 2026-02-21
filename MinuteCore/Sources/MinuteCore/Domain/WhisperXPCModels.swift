@@ -2,7 +2,7 @@ import Foundation
 
 @objc public protocol WhisperXPCTranscriptionProtocol: NSObjectProtocol {
     func transcribe(
-        wavPath: String,
+        wavData: Data,
         modelPath: String,
         detectLanguage: Bool,
         language: String,

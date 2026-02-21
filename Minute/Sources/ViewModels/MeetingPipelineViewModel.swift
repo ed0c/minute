@@ -6,6 +6,7 @@ import Combine
 import Foundation
 import MinuteCore
 import MinuteLlama
+import MinuteWhisper
 import os
 import UniformTypeIdentifiers
 
@@ -385,7 +386,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         let transcriptionService: any TranscriptionServicing
         switch transcriptionBackendStore.selectedBackend() {
         case .whisper:
-            transcriptionService = WhisperXPCTranscriptionService.liveDefault()
+            transcriptionService = ResilientWhisperTranscriptionService.liveDefault()
         case .fluidAudio:
             transcriptionService = FluidAudioTranscriptionService.liveDefault(selectionStore: fluidAudioModelStore)
         }
@@ -1687,5 +1688,131 @@ private struct FailingTranscriptionService: TranscriptionServicing {
 
     func transcribe(wavURL: URL) async throws -> TranscriptionResult {
         throw error
+    }
+}
+
+final class ResilientWhisperTranscriptionService: TranscriptionServicing, @unchecked Sendable {
+    private static let disabledXPCVersionDefaultsKey = "minute.whisper.xpc.disabled.version"
+
+    private let primary: any TranscriptionServicing
+    private let fallback: any TranscriptionServicing
+    private let defaults: UserDefaults
+    private let currentAppVersion: String
+    private let stateLock = NSLock()
+    private var xpcDisabledForCurrentVersion: Bool
+    private let logger = Logger(subsystem: "roblibob.Minute", category: "whisper-resilience")
+
+    init(
+        primary: any TranscriptionServicing,
+        fallback: any TranscriptionServicing,
+        defaults: UserDefaults = .standard,
+        currentAppVersion: String = ResilientWhisperTranscriptionService.resolveCurrentAppVersion()
+    ) {
+        self.primary = primary
+        self.fallback = fallback
+        self.defaults = defaults
+        self.currentAppVersion = currentAppVersion
+        self.xpcDisabledForCurrentVersion =
+            defaults.string(forKey: Self.disabledXPCVersionDefaultsKey) == currentAppVersion
+    }
+
+    static func liveDefault() -> ResilientWhisperTranscriptionService {
+        ResilientWhisperTranscriptionService(
+            primary: WhisperXPCTranscriptionService.liveDefault(),
+            fallback: WhisperLibraryTranscriptionService.liveDefault(),
+            defaults: .standard
+        )
+    }
+
+    func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        if isXPCDisabledForCurrentVersion() {
+            return try await fallback.transcribe(wavURL: wavURL)
+        }
+
+        do {
+            return try await primary.transcribe(wavURL: wavURL)
+        } catch {
+            guard shouldFallbackToInProcessWhisper(for: error) else {
+                throw error
+            }
+
+            disableXPCForCurrentVersion()
+            logger.error("Whisper XPC failed; retrying in-process whisper. reason=\(ErrorHandler.debugMessage(for: error), privacy: .public)")
+            return try await fallback.transcribe(wavURL: wavURL)
+        }
+    }
+
+    private static func resolveCurrentAppVersion() -> String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = (info?["CFBundleShortVersionString"] as? String) ?? "0"
+        let buildVersion = (info?["CFBundleVersion"] as? String) ?? "0"
+        return "\(shortVersion)-\(buildVersion)"
+    }
+
+    private func isXPCDisabledForCurrentVersion() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return xpcDisabledForCurrentVersion
+    }
+
+    private func disableXPCForCurrentVersion() {
+        stateLock.lock()
+        if xpcDisabledForCurrentVersion {
+            stateLock.unlock()
+            return
+        }
+        xpcDisabledForCurrentVersion = true
+        stateLock.unlock()
+        defaults.set(currentAppVersion, forKey: Self.disabledXPCVersionDefaultsKey)
+    }
+
+    private func shouldFallbackToInProcessWhisper(for error: Error) -> Bool {
+        if let minuteError = error as? MinuteError {
+            switch minuteError {
+            case .whisperMissing:
+                return true
+            case .whisperFailed(let exitCode, let output):
+                guard exitCode == -1 else { return false }
+                let normalized = output.lowercased()
+                if normalized.isEmpty {
+                    return true
+                }
+                if normalized.contains("code=257")
+                    || normalized.contains("code=260")
+                    || normalized.contains("operation not permitted")
+                    || normalized.contains("no such file or directory")
+                    || normalized.contains("don’t have permission")
+                    || normalized.contains("don't have permission")
+                    || normalized.contains("permission to view it")
+                    || normalized.contains("nscocoaerrordomain")
+                    || normalized.contains("nsposixerrordomain")
+                    || normalized.contains("xpc")
+                    || normalized.contains("unable to obtain a task name port right") {
+                    return true
+                }
+                return true
+            default:
+                break
+            }
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError {
+            return true
+        }
+
+        if nsError.domain == NSPOSIXErrorDomain && nsError.code == 1 {
+            return true
+        }
+
+        if nsError.domain == NSPOSIXErrorDomain && nsError.code == 2 {
+            return true
+        }
+
+        if nsError.domain == "NSXPCConnectionErrorDomain" {
+            return true
+        }
+
+        return false
     }
 }

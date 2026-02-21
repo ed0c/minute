@@ -234,3 +234,136 @@ struct OnboardingPersistenceCoverageTests {
         #expect(secondLaunch.isComplete)
     }
 }
+
+struct ResilientWhisperTranscriptionServiceTests {
+    @Test
+    func transcribe_whenPrimaryReturnsPermissionDenied_fallsBackToSecondary() async throws {
+        let fallbackResult = TranscriptionResult(
+            text: "fallback transcript",
+            segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "fallback transcript")]
+        )
+        let service = ResilientWhisperTranscriptionService(
+            primary: StubTranscriptionService(
+                result: .failure(
+                    MinuteError.whisperFailed(
+                        exitCode: -1,
+                        output: "Error Domain=NSCocoaErrorDomain Code=257 Operation not permitted"
+                    )
+                )
+            ),
+            fallback: StubTranscriptionService(result: .success(fallbackResult)),
+            defaults: .standard,
+            currentAppVersion: "test-version"
+        )
+
+        let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+        try Data([0x00]).write(to: wavURL, options: [.atomic])
+
+        let result = try await service.transcribe(wavURL: wavURL)
+        #expect(result == fallbackResult)
+    }
+
+    @Test
+    func transcribe_whenPrimaryReturnsNonPermissionFailure_doesNotFallback() async {
+        let expected = MinuteError.whisperFailed(exitCode: 12, output: "decoder failed")
+        let service = ResilientWhisperTranscriptionService(
+            primary: StubTranscriptionService(result: .failure(expected)),
+            fallback: StubTranscriptionService(
+                result: .success(
+                    TranscriptionResult(text: "unused", segments: [])
+                )
+            ),
+            defaults: .standard,
+            currentAppVersion: "test-version"
+        )
+
+        let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+        try? Data([0x00]).write(to: wavURL, options: [.atomic])
+
+        do {
+            _ = try await service.transcribe(wavURL: wavURL)
+            #expect(Bool(false), "Expected non-permission failure to be rethrown")
+        } catch let minuteError as MinuteError {
+            switch minuteError {
+            case .whisperFailed(let exitCode, let output):
+                #expect(exitCode == 12)
+                #expect(output == "decoder failed")
+            default:
+                #expect(Bool(false), "Expected whisperFailed, got \(minuteError)")
+            }
+        } catch {
+            #expect(Bool(false), "Unexpected error type: \(error)")
+        }
+    }
+
+    @Test
+    func transcribe_afterXPCFailure_disablesPrimaryForCurrentVersion() async throws {
+        let suite = "ResilientWhisperTranscriptionServiceTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let primary = CountingTranscriptionService(
+            result: .failure(MinuteError.whisperFailed(exitCode: -1, output: "xpc failure"))
+        )
+        let fallbackResult = TranscriptionResult(text: "fallback transcript", segments: [])
+        let fallback = CountingTranscriptionService(result: .success(fallbackResult))
+
+        let first = ResilientWhisperTranscriptionService(
+            primary: primary,
+            fallback: fallback,
+            defaults: defaults,
+            currentAppVersion: "0.18-test"
+        )
+
+        let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("resilient-whisper-test-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+        try Data([0x00]).write(to: wavURL, options: [.atomic])
+
+        _ = try await first.transcribe(wavURL: wavURL)
+        #expect(await primary.callCount == 1)
+        #expect(await fallback.callCount == 1)
+
+        let primaryAfterDisable = CountingTranscriptionService(
+            result: .success(TranscriptionResult(text: "xpc transcript", segments: []))
+        )
+        let fallbackAfterDisable = CountingTranscriptionService(result: .success(fallbackResult))
+        let second = ResilientWhisperTranscriptionService(
+            primary: primaryAfterDisable,
+            fallback: fallbackAfterDisable,
+            defaults: defaults,
+            currentAppVersion: "0.18-test"
+        )
+
+        let secondResult = try await second.transcribe(wavURL: wavURL)
+        #expect(secondResult == fallbackResult)
+        #expect(await primaryAfterDisable.callCount == 0)
+        #expect(await fallbackAfterDisable.callCount == 1)
+    }
+}
+
+private actor CountingTranscriptionService: TranscriptionServicing {
+    let result: Result<TranscriptionResult, Error>
+    private(set) var callCount = 0
+
+    init(result: Result<TranscriptionResult, Error>) {
+        self.result = result
+    }
+
+    func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        _ = wavURL
+        callCount += 1
+        return try result.get()
+    }
+}
+
+private struct StubTranscriptionService: TranscriptionServicing {
+    let result: Result<TranscriptionResult, Error>
+
+    func transcribe(wavURL: URL) async throws -> TranscriptionResult {
+        _ = wavURL
+        return try result.get()
+    }
+}
