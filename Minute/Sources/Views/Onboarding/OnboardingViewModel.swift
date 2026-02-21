@@ -73,7 +73,6 @@ final class OnboardingViewModel: ObservableObject {
         static let didCompleteOnboarding = "didCompleteOnboarding"
         static let lastStep = "onboardingLastStep"
         static let didSkipPermissions = "didSkipOnboardingPermissions"
-        static let debugBuildStamp = "onboardingDebugBuildStamp"
     }
 
     init(
@@ -123,9 +122,9 @@ final class OnboardingViewModel: ObservableObject {
             defaults: defaults,
             key: AppConfiguration.Defaults.vaultRootBookmarkKey
         )
+        Self.migrateLegacyCompletionIfNeeded(defaults: defaults, bookmarkStore: bookmarkStore)
         self.vaultAccess = VaultAccess(bookmarkStore: bookmarkStore)
 
-        resetForDebugBuildIfNeeded()
         refreshAll()
 
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -458,36 +457,19 @@ final class OnboardingViewModel: ObservableObject {
         permissionsReady || didSkipPermissions
     }
 
-    private func resetForDebugBuildIfNeeded() {
-        #if DEBUG
-        let currentStamp = debugBuildStamp()
-        let previousStamp = defaults.double(forKey: DefaultsKey.debugBuildStamp)
-
-        if currentStamp > 0, previousStamp > 0, currentStamp != previousStamp {
-            resetOnboardingState()
+    private static func migrateLegacyCompletionIfNeeded(
+        defaults: UserDefaults,
+        bookmarkStore: any VaultBookmarkStoring
+    ) {
+        guard defaults.object(forKey: DefaultsKey.didCompleteOnboarding) == nil else {
+            return
+        }
+        guard bookmarkStore.loadVaultRootBookmark() != nil else {
+            return
         }
 
-        if currentStamp > 0 {
-            defaults.set(currentStamp, forKey: DefaultsKey.debugBuildStamp)
-        }
-        #endif
-    }
-
-    private func resetOnboardingState() {
-        defaults.removeObject(forKey: DefaultsKey.didShowIntro)
-        defaults.removeObject(forKey: DefaultsKey.didCompleteOnboarding)
-        defaults.removeObject(forKey: DefaultsKey.lastStep)
-        defaults.removeObject(forKey: DefaultsKey.didSkipPermissions)
-    }
-
-    private func debugBuildStamp() -> Double {
-        guard let executableURL = Bundle.main.executableURL,
-              let attributes = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
-              let modified = attributes[.modificationDate] as? Date
-        else {
-            return 0
-        }
-
-        return modified.timeIntervalSince1970
+        defaults.set(true, forKey: DefaultsKey.didShowIntro)
+        defaults.set(true, forKey: DefaultsKey.didCompleteOnboarding)
+        defaults.set(Step.complete.rawValue, forKey: DefaultsKey.lastStep)
     }
 }

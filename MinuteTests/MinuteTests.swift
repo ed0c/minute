@@ -177,3 +177,60 @@ struct MeetingNotesBrowserViewModelSpeakerDraftIsolationTests {
         #expect(rewritten.contains("Speaker 3"))
     }
 }
+
+@MainActor
+struct OnboardingPersistenceCoverageTests {
+    @Test
+    func newUser_seesOnboarding() throws {
+        let suite = "OnboardingPersistenceCoverageTests.newUser.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(model.isComplete == false)
+    }
+
+    @Test
+    func legacyUserWithVaultBookmark_skipsOnboarding() throws {
+        let suite = "OnboardingPersistenceCoverageTests.legacyBookmark.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let vaultRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-onboarding-legacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let bookmark = try VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
+        let bookmarkStore = UserDefaultsVaultBookmarkStore(
+            defaults: defaults,
+            key: AppConfiguration.Defaults.vaultRootBookmarkKey
+        )
+        bookmarkStore.saveVaultRootBookmark(bookmark)
+
+        let model = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(model.isComplete)
+    }
+
+    @Test
+    func completedUser_remainsCompletedAcrossRelaunches() throws {
+        let suite = "OnboardingPersistenceCoverageTests.completedUser.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(true, forKey: "didShowOnboardingIntro")
+        defaults.set(true, forKey: "didCompleteOnboarding")
+        defaults.set(OnboardingViewModel.Step.complete.rawValue, forKey: "onboardingLastStep")
+
+        let firstLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+        let secondLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(firstLaunch.isComplete)
+        #expect(secondLaunch.isComplete)
+    }
+}
