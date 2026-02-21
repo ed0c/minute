@@ -5,7 +5,7 @@ struct ModelsSettingsSection: View {
     @ObservedObject var model: ModelsSettingsViewModel
 
     var body: some View {
-        Section("Models") {
+        Section("AI Models") {
             VStack(alignment: .leading, spacing: 12) {
                 TranscriptionBackendPicker(
                     backends: model.transcriptionBackends,

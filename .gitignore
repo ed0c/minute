@@ -26,3 +26,5 @@ TestResults/
 
 # SourceKit-LSP / build server (machine-specific)
 buildServer.json
+*.log
+.env*

@@ -14,11 +14,11 @@ struct VaultConfigurationView: View {
         switch style {
         case .settings:
             Group {
-                Section("Vault") {
+                Section("Vault Location") {
                     vaultRootSection
                 }
 
-                Section("Folders") {
+                Section("Vault Folder Mapping") {
                     foldersSection
                 }
             }

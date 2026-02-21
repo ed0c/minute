@@ -20,7 +20,7 @@ struct GeneralSettingsSection: View {
 
     var body: some View {
         Group {
-            Section("Options") {
+            Section("Recording & Output") {
                 SettingsToggleRow(
                     "Save audio",
                     detail: "When off, audio is not saved to the vault or linked in the note.",
@@ -46,7 +46,7 @@ struct GeneralSettingsSection: View {
                 )
             }
 
-            Section("Language") {
+            Section("Language & Translation") {
                 Picker("Output language", selection: outputLanguageBinding) {
                     ForEach(OutputLanguage.allCases, id: \.self) { language in
                         Text(language.displayName).tag(language)

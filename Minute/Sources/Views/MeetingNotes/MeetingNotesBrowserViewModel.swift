@@ -103,28 +103,23 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         sidebarErrorMessage = nil
         isRefreshing = true
 
-        let provider = browserProvider
         listTask = Task { [weak self] in
             do {
-                let notes = try await provider().listNotes()
-                await MainActor.run {
-                    self?.notes = notes
-                    self?.isRefreshing = false
-                    self?.refreshPreviews(for: notes)
-                    self?.applyPendingSelection(from: notes)
-                }
+                let notes = try await self?.runBrowserOperation { browser in
+                    try await browser.listNotes()
+                } ?? []
+                self?.notes = notes
+                self?.isRefreshing = false
+                self?.refreshPreviews(for: notes)
+                self?.applyPendingSelection(from: notes)
             } catch is CancellationError {
-                await MainActor.run {
-                    self?.isRefreshing = false
-                }
+                self?.isRefreshing = false
             } catch {
                 let message = ErrorHandler.userMessage(for: error, fallback: "Failed to load notes.")
-                await MainActor.run {
-                    self?.notes = []
-                    self?.sidebarErrorMessage = message
-                    self?.isRefreshing = false
-                    self?.notePreviews = [:]
-                }
+                self?.notes = []
+                self?.sidebarErrorMessage = message
+                self?.isRefreshing = false
+                self?.notePreviews = [:]
             }
         }
     }
@@ -507,30 +502,25 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         renderPlainText = false
         isLoadingContent = true
 
-        let provider = browserProvider
         loadTask = Task { [weak self] in
             do {
-                let content = try await provider().loadNoteContent(for: item)
+                let content = try await self?.runBrowserOperation { browser in
+                    try await browser.loadNoteContent(for: item)
+                } ?? ""
                 let shouldRenderPlainText = Self.shouldRenderPlainText(content)
 
-                await MainActor.run {
-                    self?.noteContent = content
-                    self?.renderPlainText = shouldRenderPlainText
-                    self?.isLoadingContent = false
+                self?.noteContent = content
+                self?.renderPlainText = shouldRenderPlainText
+                self?.isLoadingContent = false
 
-                    self?.refreshSpeakerDraftsIfPossible()
-                    self?.updateTranscriptDisplayContent()
-                }
+                self?.refreshSpeakerDraftsIfPossible()
+                self?.updateTranscriptDisplayContent()
             } catch is CancellationError {
-                await MainActor.run {
-                    self?.isLoadingContent = false
-                }
+                self?.isLoadingContent = false
             } catch {
                 let message = ErrorHandler.userMessage(for: error, fallback: "Failed to load note.")
-                await MainActor.run {
-                    self?.overlayErrorMessage = message
-                    self?.isLoadingContent = false
-                }
+                self?.overlayErrorMessage = message
+                self?.isLoadingContent = false
             }
         }
     }
@@ -553,32 +543,27 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         renderTranscriptPlainText = false
         isLoadingTranscript = true
 
-        let provider = browserProvider
         transcriptLoadTask = Task { [weak self] in
             do {
-                let content = try await provider().loadTranscriptContent(for: item)
+                let content = try await self?.runBrowserOperation { browser in
+                    try await browser.loadTranscriptContent(for: item)
+                } ?? ""
                 let shouldRenderPlainText = Self.shouldRenderPlainText(content)
 
-                await MainActor.run {
-                    self?.transcriptContent = content
-                    self?.renderTranscriptPlainText = shouldRenderPlainText
-                    self?.isLoadingTranscript = false
+                self?.transcriptContent = content
+                self?.renderTranscriptPlainText = shouldRenderPlainText
+                self?.isLoadingTranscript = false
 
-                    self?.transcriptSpeakerIDs = Self.parseSpeakerIDs(fromTranscriptMarkdown: content)
+                self?.transcriptSpeakerIDs = Self.parseSpeakerIDs(fromTranscriptMarkdown: content)
 
-                    self?.refreshSpeakerDraftsIfPossible()
-                    self?.updateTranscriptDisplayContent()
-                }
+                self?.refreshSpeakerDraftsIfPossible()
+                self?.updateTranscriptDisplayContent()
             } catch is CancellationError {
-                await MainActor.run {
-                    self?.isLoadingTranscript = false
-                }
+                self?.isLoadingTranscript = false
             } catch {
                 let message = Self.transcriptErrorMessage(for: error)
-                await MainActor.run {
-                    self?.transcriptErrorMessage = message
-                    self?.isLoadingTranscript = false
-                }
+                self?.transcriptErrorMessage = message
+                self?.isLoadingTranscript = false
             }
         }
     }
@@ -597,24 +582,38 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         guard transcriptSpeakerIDs.isEmpty else { return }
         guard transcriptSpeakerIDsTask == nil else { return }
 
-        let provider = browserProvider
         transcriptSpeakerIDsTask = Task { [weak self] in
             do {
-                let content = try await provider().loadTranscriptContent(for: item)
+                let content = try await self?.runBrowserOperation { browser in
+                    try await browser.loadTranscriptContent(for: item)
+                } ?? ""
                 let ids = Self.parseSpeakerIDs(fromTranscriptMarkdown: content)
-                await MainActor.run {
-                    self?.transcriptSpeakerIDs = ids
-                    self?.refreshSpeakerDraftsIfPossible()
-                }
+                self?.transcriptSpeakerIDs = ids
+                self?.refreshSpeakerDraftsIfPossible()
             } catch is CancellationError {
                 // Ignore.
             } catch {
                 // Ignore transcript read failures here; transcript tab handles user-visible errors.
             }
 
-            await MainActor.run {
-                self?.transcriptSpeakerIDsTask = nil
-            }
+            self?.transcriptSpeakerIDsTask = nil
+        }
+    }
+
+    private func runBrowserOperation<T: Sendable>(
+        priority: TaskPriority = .userInitiated,
+        _ operation: @escaping @Sendable (any MeetingNotesBrowsing) async throws -> T
+    ) async throws -> T {
+        let provider = browserProvider
+        let browserTask = Task.detached(priority: priority) {
+            try Task.checkCancellation()
+            return try await operation(provider())
+        }
+
+        return try await withTaskCancellationHandler {
+            try await browserTask.value
+        } onCancel: {
+            browserTask.cancel()
         }
     }
 

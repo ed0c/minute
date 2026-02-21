@@ -64,7 +64,7 @@ struct MinuteApp: App {
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
-                    appState.showSettings()
+                    appState.setActiveWorkspace(.settings)
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }

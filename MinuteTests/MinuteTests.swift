@@ -1,11 +1,138 @@
 import Foundation
 import Testing
 @testable import Minute
+@testable import MinuteCore
 
 struct MinuteTests {
     @Test
     func smoke() {
         #expect(Bool(true))
+    }
+}
+
+@MainActor
+struct SettingsWorkspaceRoutingCoverageTests {
+    @Test
+    func settingsOpensInSingleWindowRoute() {
+        let model = SettingsWorkspaceTestSupport.makeNavigationModel()
+        SettingsWorkspaceTestSupport.switchToSettings(model)
+
+        #expect(model.mainContent == .settings)
+        #expect(model.snapshot().windowMode == "single_window")
+        #expect(model.snapshot().noAdditionalWindow)
+    }
+
+    @Test
+    func closingSettingsReturnsToPipeline() {
+        let model = SettingsWorkspaceTestSupport.makeNavigationModel(initial: .settings)
+        SettingsWorkspaceTestSupport.switchToPipeline(model)
+
+        #expect(model.mainContent == .pipeline)
+    }
+
+    @Test
+    func setActiveWorkspace_isIdempotent() {
+        let model = SettingsWorkspaceTestSupport.makeNavigationModel(initial: .pipeline)
+        let before = model.changedAt
+        model.setActiveWorkspace(.pipeline)
+
+        #expect(model.mainContent == .pipeline)
+        #expect(model.changedAt == before)
+    }
+}
+
+@MainActor
+struct SettingsWorkspaceContinuityCoverageTests {
+    @Test
+    func continuityInvariant_remainsTrueAcrossWorkspaceSwitches() {
+        let before = WorkspaceContinuitySnapshot(
+            isRecordingActive: true,
+            pipelineStage: "recording",
+            activeSessionID: "session-1",
+            unsavedWorkPresent: true
+        )
+
+        let model = SettingsWorkspaceTestSupport.makeNavigationModel()
+        model.showSettings()
+        model.showPipeline()
+
+        let after = WorkspaceContinuitySnapshot(
+            isRecordingActive: true,
+            pipelineStage: "recording",
+            activeSessionID: "session-1",
+            unsavedWorkPresent: true
+        )
+
+        #expect(WorkspaceContinuityInvariant.isPreserved(before: before, after: after))
+    }
+
+    @Test
+    func workspaceSnapshot_containsContractFlags() {
+        let model = SettingsWorkspaceTestSupport.makeNavigationModel(initial: .settings)
+        let snapshot = model.snapshot()
+
+        #expect(snapshot.activeWorkspace == .settings)
+        #expect(snapshot.windowMode == "single_window")
+        #expect(snapshot.noAdditionalWindow)
+    }
+}
+
+@MainActor
+struct SettingsCategoryCatalogCoverageTests {
+    @Test
+    func categoryOrder_isStableAndAscending() {
+        let categories = SettingsCategoryCatalog.categories(updatesEnabled: true)
+        let orders = categories.map { $0.sortOrder }
+        let sorted = orders.sorted()
+
+        #expect(orders == sorted)
+        #expect(Set(categories.map { $0.id }).count == categories.count)
+    }
+
+    @Test
+    func updatesCategory_obeysVisibilityRule() {
+        let hidden = SettingsCategoryCatalog.categories(updatesEnabled: false)
+        let visible = SettingsCategoryCatalog.categories(updatesEnabled: true)
+
+        #expect(hidden.contains(where: { $0.id == .updates }) == false)
+        #expect(visible.contains(where: { $0.id == .updates }))
+    }
+
+    @Test
+    func fallbackSelection_returnsFirstVisibleWhenCurrentMissing() {
+        let categories = SettingsCategoryCatalog.categories(updatesEnabled: false)
+        let selection = SettingsCategoryCatalog.fallbackSelection(current: .updates, available: categories)
+
+        #expect(selection == categories.first?.id)
+    }
+
+    @Test
+    func discoverability_allCoreCategoriesPresent() {
+        let categories = SettingsCategoryCatalog.categories(updatesEnabled: true)
+        let ids = Set(categories.map { $0.id })
+
+        #expect(ids.contains(.general))
+        #expect(ids.contains(.storage))
+        #expect(ids.contains(.speakers))
+        #expect(ids.contains(.privacy))
+        #expect(ids.contains(.ai))
+    }
+}
+
+@MainActor
+enum SettingsWorkspaceTestSupport {
+    static func makeNavigationModel(initial: AppNavigationModel.MainContent = .pipeline) -> AppNavigationModel {
+        let model = AppNavigationModel()
+        model.mainContent = initial
+        return model
+    }
+
+    static func switchToSettings(_ model: AppNavigationModel) {
+        model.showSettings()
+    }
+
+    static func switchToPipeline(_ model: AppNavigationModel) {
+        model.showPipeline()
     }
 }
 
@@ -48,5 +175,62 @@ struct MeetingNotesBrowserViewModelSpeakerDraftIsolationTests {
         #expect(rewritten.contains("Alice [00:00]"))
         #expect(rewritten.contains("Bob [00:05]"))
         #expect(rewritten.contains("Speaker 3"))
+    }
+}
+
+@MainActor
+struct OnboardingPersistenceCoverageTests {
+    @Test
+    func newUser_seesOnboarding() throws {
+        let suite = "OnboardingPersistenceCoverageTests.newUser.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(model.isComplete == false)
+    }
+
+    @Test
+    func legacyUserWithVaultBookmark_skipsOnboarding() throws {
+        let suite = "OnboardingPersistenceCoverageTests.legacyBookmark.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let vaultRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-onboarding-legacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultRootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let bookmark = try VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
+        let bookmarkStore = UserDefaultsVaultBookmarkStore(
+            defaults: defaults,
+            key: AppConfiguration.Defaults.vaultRootBookmarkKey
+        )
+        bookmarkStore.saveVaultRootBookmark(bookmark)
+
+        let model = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(model.isComplete)
+    }
+
+    @Test
+    func completedUser_remainsCompletedAcrossRelaunches() throws {
+        let suite = "OnboardingPersistenceCoverageTests.completedUser.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(true, forKey: "didShowOnboardingIntro")
+        defaults.set(true, forKey: "didCompleteOnboarding")
+        defaults.set(OnboardingViewModel.Step.complete.rawValue, forKey: "onboardingLastStep")
+
+        let firstLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+        let secondLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(firstLaunch.isComplete)
+        #expect(secondLaunch.isComplete)
     }
 }

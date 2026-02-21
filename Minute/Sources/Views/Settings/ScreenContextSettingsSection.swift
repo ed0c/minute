@@ -27,22 +27,27 @@ struct ScreenContextSettingsSection: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Slider(value: captureIntervalIndex, in: 0...Double(Self.captureIntervals.count - 1), step: 1)
                         .tint(.accentColor)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    HStack {
+                    HStack(spacing: 0) {
                         ForEach(Self.captureIntervals.indices, id: \.self) { index in
                             let value = Self.captureIntervals[index]
+                            let alignment: Alignment = {
+                                if index == 0 { return .leading }
+                                if index == Self.captureIntervals.count - 1 { return .trailing }
+                                return .center
+                            }()
+
                             Text(Self.label(for: value))
                                 .minuteCaption()
-                            if index < Self.captureIntervals.count - 1 {
-                                Spacer()
-                            }
+                                .frame(maxWidth: .infinity, alignment: alignment)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .gridCellColumns(2)
 
             SettingsToggleRow(
                 "Enhance video imports with frame text",
