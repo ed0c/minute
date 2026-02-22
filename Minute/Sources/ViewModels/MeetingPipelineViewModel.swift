@@ -67,6 +67,14 @@ final class MeetingPipelineViewModel: ObservableObject {
         var isFirstInferenceDeferred: Bool
     }
 
+    private struct ObservedDefaultsSnapshot: Equatable {
+        var vaultRootBookmark: Data?
+        var vaultRootPathDisplay: String?
+        var outputLanguageRawValue: String?
+        var transcriptionBackendID: String?
+        var vocabularySettings: GlobalVocabularyBoostingSettings
+    }
+
     enum CaptureState: Equatable {
         case ready
         case recording
@@ -181,12 +189,13 @@ final class MeetingPipelineViewModel: ObservableObject {
     private let vaultAccess: VaultAccess
 
     private let logger = Logger(subsystem: "roblibob.Minute", category: "pipeline")
+    private let defaults: UserDefaults
 
     private var defaultsObserver: AnyCancellable?
+    private var observedDefaultsSnapshot: ObservedDefaultsSnapshot?
     private var cancellables: Set<AnyCancellable> = []
     private var processingTask: Task<Void, Never>?
     private var backgroundProcessingObserverTask: Task<Void, Never>?
-    private var vaultStatusTask: Task<Void, Never>?
     private var isPreparingPipelineContext = false
     private var lastAudioLevelUpdate: CFTimeInterval = 0
     private var screenContextEvents: [ScreenContextEvent] = []
@@ -219,7 +228,8 @@ final class MeetingPipelineViewModel: ObservableObject {
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
         vocabularySettingsStore: (any VocabularyBoostingSettingsStoring) = VocabularyBoostingSettingsStore(),
         sessionVocabularyResolver: (any SessionVocabularyResolving) = SessionVocabularyResolver(),
-        modelValidationProvider: (@Sendable () async throws -> ModelValidationResult)? = nil
+        modelValidationProvider: (@Sendable () async throws -> ModelValidationResult)? = nil,
+        defaults: UserDefaults = .standard
     ) {
         self.audioService = audioService
         self.mediaImportService = mediaImportService
@@ -240,6 +250,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         self.sessionVocabularyResolver = sessionVocabularyResolver
         self.modelValidationProvider = modelValidationProvider ?? { ModelValidationResult(missingModelIDs: [], invalidModelIDs: []) }
         self.vaultAccess = vaultAccess
+        self.defaults = defaults
         self.screenCaptureEnabled = screenContextSettingsStore.isEnabled
 
         loadStagePreferences()
@@ -250,18 +261,16 @@ final class MeetingPipelineViewModel: ObservableObject {
         refreshVocabularySettings()
         refreshMicrophonePermission()
         refreshScreenRecordingPermission()
+        observedDefaultsSnapshot = makeObservedDefaultsSnapshot()
 
         defaultsObserver = NotificationCenter.default.publisher(
             for: UserDefaults.didChangeNotification,
-            object: UserDefaults.standard
+            object: defaults
         )
             .receive(on: RunLoop.main)
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshVaultStatus()
-                self?.refreshOutputLanguageSetting()
-                self?.refreshTranscriptionBackendSetting()
-                self?.refreshVocabularySettings()
+                self?.handleDefaultsDidChange()
             }
 
         startStagePreferencesObservation()
@@ -341,7 +350,6 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     deinit {
-        vaultStatusTask?.cancel()
         processingTask?.cancel()
         backgroundProcessingObserverTask?.cancel()
         screenContextAutoStopTask?.cancel()
@@ -435,24 +443,25 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     func refreshVaultStatus() {
-        vaultStatusTask?.cancel()
-        let access = vaultAccess
-        vaultStatusTask = Task { [weak self] in
-            let status: VaultStatus
-            do {
-                let url = try await access.resolveVaultRootURL(timeout: .seconds(2))
-                status = VaultStatus(displayText: url.path, isConfigured: true)
-            } catch {
-                status = VaultStatus(displayText: "Not selected", isConfigured: false)
+        let hasBookmark = defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey) != nil
+        let storedPath = defaults.string(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayText: String
+        if hasBookmark {
+            if let storedPath, !storedPath.isEmpty {
+                displayText = storedPath
+            } else {
+                displayText = "Vault selected"
             }
-
-            guard !Task.isCancelled else { return }
-            self?.vaultStatus = status
+        } else {
+            displayText = "Not selected"
         }
+        let updatedStatus = VaultStatus(displayText: displayText, isConfigured: hasBookmark)
+        guard vaultStatus != updatedStatus else { return }
+        vaultStatus = updatedStatus
     }
 
     func refreshOutputLanguageSetting() {
-        let defaults = UserDefaults.standard
         let rawValue = defaults.string(forKey: AppConfiguration.Defaults.outputLanguageKey)
         outputLanguage = OutputLanguage.resolved(from: rawValue)
     }
@@ -471,6 +480,48 @@ final class MeetingPipelineViewModel: ObservableObject {
         vocabularyBoostingEnabledInSettings = settings.enabled
         globalVocabularyTerms = settings.terms
         syncSessionVocabularyModeWithCurrentInput(using: settings)
+    }
+
+    private func handleDefaultsDidChange() {
+        let snapshot = makeObservedDefaultsSnapshot()
+        guard snapshot != observedDefaultsSnapshot else { return }
+
+        let previous = observedDefaultsSnapshot
+        observedDefaultsSnapshot = snapshot
+
+        guard let previous else {
+            refreshVaultStatus()
+            refreshOutputLanguageSetting()
+            refreshTranscriptionBackendSetting()
+            refreshVocabularySettings()
+            return
+        }
+
+        let vaultStatusChanged =
+            previous.vaultRootBookmark != snapshot.vaultRootBookmark
+            || previous.vaultRootPathDisplay != snapshot.vaultRootPathDisplay
+        if vaultStatusChanged {
+            refreshVaultStatus()
+        }
+        if previous.outputLanguageRawValue != snapshot.outputLanguageRawValue {
+            refreshOutputLanguageSetting()
+        }
+        if previous.transcriptionBackendID != snapshot.transcriptionBackendID {
+            refreshTranscriptionBackendSetting()
+        }
+        if previous.vocabularySettings != snapshot.vocabularySettings {
+            refreshVocabularySettings()
+        }
+    }
+
+    private func makeObservedDefaultsSnapshot() -> ObservedDefaultsSnapshot {
+        return ObservedDefaultsSnapshot(
+            vaultRootBookmark: defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey),
+            vaultRootPathDisplay: defaults.string(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey),
+            outputLanguageRawValue: defaults.string(forKey: AppConfiguration.Defaults.outputLanguageKey),
+            transcriptionBackendID: transcriptionBackendStore.selectedBackendID(),
+            vocabularySettings: vocabularySettingsStore.load()
+        )
     }
 
     func setSessionVocabularyMode(_ mode: VocabularyBoostingSessionMode) {

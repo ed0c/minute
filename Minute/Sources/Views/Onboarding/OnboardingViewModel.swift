@@ -56,7 +56,6 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private let modelManager: any ModelManaging
-    private let vaultAccess: VaultAccess
     private let defaults: UserDefaults
     private let summarizationModelStore: SummarizationModelSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
@@ -64,9 +63,9 @@ final class OnboardingViewModel: ObservableObject {
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
 
     private var defaultsObserver: AnyCancellable?
+    private var observedVaultBookmark: Data?
     private var modelTask: Task<Void, Never>?
     private var modelsValidationTask: Task<Void, Never>?
-    private var vaultStatusTask: Task<Void, Never>?
 
     private enum DefaultsKey {
         static let didShowIntro = "didShowOnboardingIntro"
@@ -123,19 +122,21 @@ final class OnboardingViewModel: ObservableObject {
             key: AppConfiguration.Defaults.vaultRootBookmarkKey
         )
         Self.migrateLegacyCompletionIfNeeded(defaults: defaults, bookmarkStore: bookmarkStore)
-        self.vaultAccess = VaultAccess(bookmarkStore: bookmarkStore)
 
         refreshAll()
+        observedVaultBookmark = currentVaultBookmark()
 
-        defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        defaultsObserver = NotificationCenter.default.publisher(
+            for: UserDefaults.didChangeNotification,
+            object: defaults
+        )
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshVaultStatus()
+                self?.handleDefaultsDidChange()
             }
     }
 
     deinit {
-        vaultStatusTask?.cancel()
         modelTask?.cancel()
         modelsValidationTask?.cancel()
     }
@@ -299,22 +300,22 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    private func refreshVaultStatus() {
-        vaultStatusTask?.cancel()
-        let access = vaultAccess
-        vaultStatusTask = Task { [weak self] in
-            let isConfigured: Bool
-            do {
-                _ = try await access.resolveVaultRootURL(timeout: .seconds(2))
-                isConfigured = true
-            } catch {
-                isConfigured = false
-            }
+    private func handleDefaultsDidChange() {
+        let bookmark = currentVaultBookmark()
+        guard bookmark != observedVaultBookmark else { return }
+        observedVaultBookmark = bookmark
+        refreshVaultStatus()
+    }
 
-            guard !Task.isCancelled else { return }
-            self?.vaultConfigured = isConfigured
-            self?.updateCurrentStepIfNeeded()
-        }
+    private func currentVaultBookmark() -> Data? {
+        defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey)
+    }
+
+    private func refreshVaultStatus() {
+        let isConfigured = currentVaultBookmark() != nil
+        guard vaultConfigured != isConfigured else { return }
+        vaultConfigured = isConfigured
+        updateCurrentStepIfNeeded()
     }
 
     private func refreshModelsStatus() async {

@@ -3,6 +3,7 @@ import Foundation
 public struct AppConfiguration: Sendable, Equatable {
     public struct Defaults {
         public static let vaultRootBookmarkKey = "vaultRootBookmark"
+        public static let vaultRootPathDisplayKey = "vaultRootPathDisplay"
         public static let meetingsRelativePathKey = "meetingsRelativePath"
         public static let audioRelativePathKey = "audioRelativePath"
         public static let transcriptsRelativePathKey = "transcriptsRelativePath"

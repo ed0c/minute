@@ -26,6 +26,13 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
         var durationSeconds: TimeInterval?
     }
 
+    private struct ObservedDefaultsSnapshot: Equatable {
+        var vaultRootBookmark: Data?
+        var meetingsRelativePath: String
+        var audioRelativePath: String
+        var transcriptsRelativePath: String
+    }
+
     @Published private(set) var notes: [MeetingNoteItem] = []
     @Published private(set) var isRefreshing: Bool = false
     @Published private(set) var sidebarErrorMessage: String?
@@ -68,6 +75,7 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
     // Speaker IDs discovered from the transcript file, independent of which tab is currently selected.
     @Published private(set) var transcriptSpeakerIDs: [Int] = []
 
+    private let defaults: UserDefaults
     private let browserProvider: @Sendable () -> any MeetingNotesBrowsing
     private var pendingSelectionURL: URL?
     private var listTask: Task<Void, Never>?
@@ -77,14 +85,23 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
     private var deleteTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
     private var defaultsObserver: AnyCancellable?
+    private var observedDefaultsSnapshot: ObservedDefaultsSnapshot?
 
-    init(browserProvider: @escaping @Sendable () -> any MeetingNotesBrowsing = MeetingNotesBrowserViewModel.defaultBrowserProvider) {
+    init(
+        defaults: UserDefaults = .standard,
+        browserProvider: @escaping @Sendable () -> any MeetingNotesBrowsing = MeetingNotesBrowserViewModel.defaultBrowserProvider
+    ) {
+        self.defaults = defaults
         self.browserProvider = browserProvider
+        observedDefaultsSnapshot = makeObservedDefaultsSnapshot()
 
-        defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        defaultsObserver = NotificationCenter.default.publisher(
+            for: UserDefaults.didChangeNotification,
+            object: defaults
+        )
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.handleDefaultsDidChange()
             }
     }
 
@@ -122,6 +139,23 @@ final class MeetingNotesBrowserViewModel: ObservableObject {
                 self?.notePreviews = [:]
             }
         }
+    }
+
+    private func handleDefaultsDidChange() {
+        let snapshot = makeObservedDefaultsSnapshot()
+        guard snapshot != observedDefaultsSnapshot else { return }
+        observedDefaultsSnapshot = snapshot
+        refresh()
+    }
+
+    private func makeObservedDefaultsSnapshot() -> ObservedDefaultsSnapshot {
+        let configuration = AppConfiguration(defaults: defaults)
+        return ObservedDefaultsSnapshot(
+            vaultRootBookmark: defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey),
+            meetingsRelativePath: configuration.meetingsRelativePath,
+            audioRelativePath: configuration.audioRelativePath,
+            transcriptsRelativePath: configuration.transcriptsRelativePath
+        )
     }
 
     func select(_ item: MeetingNoteItem) {

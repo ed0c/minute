@@ -119,7 +119,7 @@ struct PipelineContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .minuteRecordingAlertShowPipeline)) { _ in
                 notesModel.dismissOverlay()
             }
-            .onReceive(appState.$mainContent.removeDuplicates()) { mainContent in
+            .onChange(of: appState.mainContent) { _, mainContent in
                 if mainContent == .pipeline {
                     model.workspaceDidBecomeVisible()
                 }

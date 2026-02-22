@@ -26,11 +26,10 @@ final class VaultSettingsModel: ObservableObject {
     @Published var lastVerificationMessage: String?
     @Published var lastErrorMessage: String?
 
+    private let defaults = UserDefaults.standard
     private let bookmarkStore = UserDefaultsVaultBookmarkStore(key: AppConfiguration.Defaults.vaultRootBookmarkKey)
-    private var vaultPathTask: Task<Void, Never>?
 
     init() {
-        let defaults = UserDefaults.standard
         self.meetingsRelativePath = AppConfiguration.validatedRelativePath(
             defaults.string(forKey: AppConfiguration.Defaults.meetingsRelativePathKey),
             fallback: AppConfiguration.Defaults.defaultMeetingsRelativePath
@@ -47,10 +46,6 @@ final class VaultSettingsModel: ObservableObject {
         refreshVaultPathDisplay()
     }
 
-    deinit {
-        vaultPathTask?.cancel()
-    }
-
     func chooseVaultRootFolder() async {
         lastErrorMessage = nil
         lastVerificationMessage = nil
@@ -62,6 +57,7 @@ final class VaultSettingsModel: ObservableObject {
         do {
             let bookmark = try VaultAccess.makeBookmarkData(forVaultRootURL: url)
             bookmarkStore.saveVaultRootBookmark(bookmark)
+            defaults.set(url.path, forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey)
             refreshVaultPathDisplay()
         } catch {
             lastErrorMessage = "Failed to save vault bookmark: \(error.localizedDescription)"
@@ -70,6 +66,7 @@ final class VaultSettingsModel: ObservableObject {
 
     func clearVaultSelection() {
         bookmarkStore.clearVaultRootBookmark()
+        defaults.removeObject(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey)
         refreshVaultPathDisplay()
     }
 
@@ -102,20 +99,23 @@ final class VaultSettingsModel: ObservableObject {
     }
 
     private func refreshVaultPathDisplay() {
-        let access = VaultAccess(bookmarkStore: bookmarkStore)
-        vaultPathTask?.cancel()
-        vaultPathTask = Task { [weak self] in
-            let displayPath: String
-            do {
-                let url = try await access.resolveVaultRootURL(timeout: .seconds(2))
-                displayPath = url.path
-            } catch {
-                displayPath = "Not selected"
-            }
-
-            guard !Task.isCancelled else { return }
-            self?.vaultRootPathDisplay = displayPath
+        guard bookmarkStore.loadVaultRootBookmark() != nil else {
+            setVaultPathDisplay("Not selected")
+            return
         }
+
+        let storedPath = defaults.string(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let storedPath, !storedPath.isEmpty {
+            setVaultPathDisplay(storedPath)
+        } else {
+            setVaultPathDisplay("Vault selected")
+        }
+    }
+
+    private func setVaultPathDisplay(_ value: String) {
+        guard vaultRootPathDisplay != value else { return }
+        vaultRootPathDisplay = value
     }
 
     private func openFolderPanel() async -> URL? {
