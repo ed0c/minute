@@ -1,5 +1,7 @@
 import Foundation
 import MinuteCore
+import Testing
+@testable import Minute
 
 actor AutoSilenceAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling {
     private var levelHandler: (@Sendable (Float) -> Void)?
@@ -89,3 +91,47 @@ func eventually(
 }
 
 private struct EventuallyTimeoutError: Error {}
+
+struct PipelineViewModelFixtureDependencies {
+    var defaults: UserDefaults
+    var stagePreferencesStore: StagePreferencesStore
+    var coordinator: MeetingPipelineCoordinator
+    var viewModelVaultAccess: VaultAccess
+}
+
+enum PipelineViewModelFixtureBuilder {
+    static func makeDependencies(
+        suiteName: String,
+        summarizationServiceProvider: @escaping @Sendable () -> any SummarizationServicing = {
+            MockSummarizationService()
+        }
+    ) throws -> PipelineViewModelFixtureDependencies {
+        let defaults = try makeIsolatedDefaults(suiteName: suiteName)
+        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
+        stagePreferencesStore.clear()
+
+        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: summarizationServiceProvider,
+            modelManager: MockModelManager(),
+            vaultAccess: coordinatorVaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        return PipelineViewModelFixtureDependencies(
+            defaults: defaults,
+            stagePreferencesStore: stagePreferencesStore,
+            coordinator: coordinator,
+            viewModelVaultAccess: viewModelVaultAccess
+        )
+    }
+
+    static func makeIsolatedDefaults(suiteName: String) throws -> UserDefaults {
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+}

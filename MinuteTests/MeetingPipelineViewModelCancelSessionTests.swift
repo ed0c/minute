@@ -9,36 +9,20 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let audioService = TestAudioService()
 
         let suiteName = "MeetingPipelineViewModelCancelSessionTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         var model: MeetingPipelineViewModel? = await MainActor.run {
             return MeetingPipelineViewModel(
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
         #expect(model != nil)
@@ -89,24 +73,7 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let permissionsProbe = RecordingPermissionProbe()
 
         let suiteName = "MeetingPipelineViewModelAudioOnlyPermissionTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         let permissions = MeetingPipelineViewModel.RecordingPermissions(
             requestMicrophonePermission: {
@@ -122,13 +89,13 @@ struct MeetingPipelineViewModelCancelSessionTests {
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: permissions,
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
         #expect(model != nil)
@@ -180,36 +147,20 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let importService = BlockingMediaImportService()
 
         let suiteName = "MeetingPipelineViewModelImportingStartRecordingTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         var model: MeetingPipelineViewModel? = await MainActor.run {
             MeetingPipelineViewModel(
                 audioService: audioService,
                 mediaImportService: importService,
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
 
@@ -281,37 +232,20 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let audioService = TestAudioService()
 
         let suiteName = "MeetingPipelineViewModelScreenContextSelectionSwitchTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         var model: MeetingPipelineViewModel? = await MainActor.run {
             MeetingPipelineViewModel(
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: captureService,
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
 
@@ -358,36 +292,20 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let audioService = SlowStopAudioService(stopDelayNanoseconds: 700_000_000)
 
         let suiteName = "MeetingPipelineViewModelStoppingStateTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         var model: MeetingPipelineViewModel? = await MainActor.run {
             MeetingPipelineViewModel(
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
 
@@ -430,36 +348,20 @@ struct MeetingPipelineViewModelCancelSessionTests {
         let audioService = MeteringAudioService()
 
         let suiteName = "MeetingPipelineViewModelAudioLevelVisualizerTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         var model: MeetingPipelineViewModel? = await MainActor.run {
             MeetingPipelineViewModel(
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore
+                stagePreferencesStore: dependencies.stagePreferencesStore
             )
         }
 
@@ -849,23 +751,7 @@ private func makeSilenceBehaviorModel(
     silenceDetectionPolicy: SilenceDetectionPolicy? = nil
 ) async throws -> MeetingPipelineViewModel {
     let suiteName = "MeetingPipelineViewModelSilenceBehaviorTests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defaults.removePersistentDomain(forName: suiteName)
-    let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-    stagePreferencesStore.clear()
-
-    let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-    let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-    let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-    let coordinator = MeetingPipelineCoordinator(
-        transcriptionService: MockTranscriptionService(),
-        diarizationService: MockDiarizationService(),
-        summarizationServiceProvider: summarizationServiceProvider,
-        modelManager: MockModelManager(),
-        vaultAccess: coordinatorVaultAccess,
-        vaultWriter: DefaultVaultWriter()
-    )
+    let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
     let alertNotifier = await MainActor.run { MockRecordingAlertNotifier() }
     let defaultPolicy = SilenceDetectionPolicy(
@@ -881,13 +767,13 @@ private func makeSilenceBehaviorModel(
             audioService: audioService,
             mediaImportService: MockMediaImportService(),
             recoveryService: MockRecordingRecoveryService(),
-            pipelineCoordinator: coordinator,
+            pipelineCoordinator: dependencies.coordinator,
             screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
             screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
             screenContextSettingsStore: ScreenContextSettingsStore(),
-            vaultAccess: viewModelVaultAccess,
+            vaultAccess: dependencies.viewModelVaultAccess,
             recordingPermissions: .alwaysGranted(),
-            stagePreferencesStore: stagePreferencesStore,
+            stagePreferencesStore: dependencies.stagePreferencesStore,
             silenceDetectionPolicy: effectivePolicy,
             recordingAlertNotifier: alertNotifier
         )

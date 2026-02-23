@@ -188,26 +188,11 @@ public struct VaultMeetingNotesBrowser: MeetingNotesBrowsing, @unchecked Sendabl
     }
 
     private static func meetingsRootURL(from vaultRootURL: URL, meetingsRelativePath: String) -> URL {
-        let components = normalizedRelative(meetingsRelativePath)
-        return components.reduce(vaultRootURL) { partial, component in
-            partial.appendingPathComponent(component, isDirectory: true)
-        }
+        VaultPathNormalizer.directoryURL(from: vaultRootURL, relativePath: meetingsRelativePath)
     }
 
     private static func directoryURL(from vaultRootURL: URL, relativePath: String) -> URL {
-        let components = normalizedRelative(relativePath)
-        return components.reduce(vaultRootURL) { partial, component in
-            partial.appendingPathComponent(component, isDirectory: true)
-        }
-    }
-
-    private static func normalizedRelative(_ path: String) -> [String] {
-        path
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            .split(separator: "/")
-            .map(String.init)
-            .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
+        VaultPathNormalizer.directoryURL(from: vaultRootURL, relativePath: relativePath)
     }
 
     private static func isExcludedDirectory(_ url: URL) -> Bool {
@@ -216,14 +201,7 @@ public struct VaultMeetingNotesBrowser: MeetingNotesBrowsing, @unchecked Sendabl
     }
 
     private static func relativePath(from vaultRootURL: URL, to fileURL: URL) -> String {
-        let rootPath = vaultRootURL.standardizedFileURL.path
-        let filePath = fileURL.standardizedFileURL.path
-        if filePath.hasPrefix(rootPath) {
-            var suffix = String(filePath.dropFirst(rootPath.count))
-            if suffix.hasPrefix("/") { suffix.removeFirst() }
-            return suffix
-        }
-        return fileURL.lastPathComponent
+        VaultPathNormalizer.relativePath(from: vaultRootURL, to: fileURL)
     }
 
     private struct ParsedFilename {

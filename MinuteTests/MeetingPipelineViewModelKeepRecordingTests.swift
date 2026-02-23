@@ -9,23 +9,7 @@ struct MeetingPipelineViewModelKeepRecordingTests {
         let audioService = AutoSilenceAudioService()
 
         let suiteName = "MeetingPipelineViewModelKeepRecordingTests"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        let stagePreferencesStore = StagePreferencesStore(defaults: defaults)
-        stagePreferencesStore.clear()
-
-        let coordinatorVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let viewModelVaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: nil))
-        let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = { MockSummarizationService() }
-
-        let coordinator = MeetingPipelineCoordinator(
-            transcriptionService: MockTranscriptionService(),
-            diarizationService: MockDiarizationService(),
-            summarizationServiceProvider: summarizationServiceProvider,
-            modelManager: MockModelManager(),
-            vaultAccess: coordinatorVaultAccess,
-            vaultWriter: DefaultVaultWriter()
-        )
+        let dependencies = try PipelineViewModelFixtureBuilder.makeDependencies(suiteName: suiteName)
 
         let alertNotifier = await MainActor.run { MockRecordingAlertNotifier() }
         let shortPolicy = SilenceDetectionPolicy(
@@ -40,13 +24,13 @@ struct MeetingPipelineViewModelKeepRecordingTests {
                 audioService: audioService,
                 mediaImportService: MockMediaImportService(),
                 recoveryService: MockRecordingRecoveryService(),
-                pipelineCoordinator: coordinator,
+                pipelineCoordinator: dependencies.coordinator,
                 screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
                 screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
                 screenContextSettingsStore: ScreenContextSettingsStore(),
-                vaultAccess: viewModelVaultAccess,
+                vaultAccess: dependencies.viewModelVaultAccess,
                 recordingPermissions: .alwaysGranted(),
-                stagePreferencesStore: stagePreferencesStore,
+                stagePreferencesStore: dependencies.stagePreferencesStore,
                 silenceDetectionPolicy: shortPolicy,
                 recordingAlertNotifier: alertNotifier
             )

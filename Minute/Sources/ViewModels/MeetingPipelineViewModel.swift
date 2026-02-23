@@ -67,14 +67,6 @@ final class MeetingPipelineViewModel: ObservableObject {
         var isFirstInferenceDeferred: Bool
     }
 
-    private struct ObservedDefaultsSnapshot: Equatable {
-        var vaultRootBookmark: Data?
-        var vaultRootPathDisplay: String?
-        var outputLanguageRawValue: String?
-        var transcriptionBackendID: String?
-        var vocabularySettings: GlobalVocabularyBoostingSettings
-    }
-
     enum CaptureState: Equatable {
         case ready
         case recording
@@ -192,7 +184,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private let defaults: UserDefaults
 
     private var defaultsObserver: AnyCancellable?
-    private var observedDefaultsSnapshot: ObservedDefaultsSnapshot?
+    private var observedDefaultsSnapshot: PipelineDefaultsObserver.Snapshot?
     private var cancellables: Set<AnyCancellable> = []
     private var processingTask: Task<Void, Never>?
     private var backgroundProcessingObserverTask: Task<Void, Never>?
@@ -484,41 +476,27 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     private func handleDefaultsDidChange() {
         let snapshot = makeObservedDefaultsSnapshot()
-        guard snapshot != observedDefaultsSnapshot else { return }
-
-        let previous = observedDefaultsSnapshot
+        let changed = PipelineDefaultsObserver.changedDomains(previous: observedDefaultsSnapshot, current: snapshot)
+        guard changed.hasChanges else { return }
         observedDefaultsSnapshot = snapshot
 
-        guard let previous else {
-            refreshVaultStatus()
-            refreshOutputLanguageSetting()
-            refreshTranscriptionBackendSetting()
-            refreshVocabularySettings()
-            return
-        }
-
-        let vaultStatusChanged =
-            previous.vaultRootBookmark != snapshot.vaultRootBookmark
-            || previous.vaultRootPathDisplay != snapshot.vaultRootPathDisplay
-        if vaultStatusChanged {
+        if changed.requiresFullRefresh || changed.vaultStatusChanged {
             refreshVaultStatus()
         }
-        if previous.outputLanguageRawValue != snapshot.outputLanguageRawValue {
+        if changed.requiresFullRefresh || changed.outputLanguageChanged {
             refreshOutputLanguageSetting()
         }
-        if previous.transcriptionBackendID != snapshot.transcriptionBackendID {
+        if changed.requiresFullRefresh || changed.transcriptionBackendChanged {
             refreshTranscriptionBackendSetting()
         }
-        if previous.vocabularySettings != snapshot.vocabularySettings {
+        if changed.requiresFullRefresh || changed.vocabularySettingsChanged {
             refreshVocabularySettings()
         }
     }
 
-    private func makeObservedDefaultsSnapshot() -> ObservedDefaultsSnapshot {
-        return ObservedDefaultsSnapshot(
-            vaultRootBookmark: defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey),
-            vaultRootPathDisplay: defaults.string(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey),
-            outputLanguageRawValue: defaults.string(forKey: AppConfiguration.Defaults.outputLanguageKey),
+    private func makeObservedDefaultsSnapshot() -> PipelineDefaultsObserver.Snapshot {
+        PipelineDefaultsObserver.makeSnapshot(
+            defaults: defaults,
             transcriptionBackendID: transcriptionBackendStore.selectedBackendID(),
             vocabularySettings: vocabularySettingsStore.load()
         )
@@ -1728,21 +1706,6 @@ final class MeetingPipelineViewModel: ObservableObject {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(content, forType: .string)
-    }
-}
-
-private struct FailingTranscriptionService: TranscriptionServicing {
-    let error: MinuteError
-
-    init(error: Error) {
-        self.error = ErrorHandler.minuteError(
-            for: error,
-            fallback: .whisperFailed(exitCode: -1, output: ErrorHandler.debugMessage(for: error))
-        )
-    }
-
-    func transcribe(wavURL: URL) async throws -> TranscriptionResult {
-        throw error
     }
 }
 

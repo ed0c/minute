@@ -62,41 +62,19 @@ final class SystemAudioCapture: @unchecked Sendable {
 
 private extension SystemAudioCapture {
     static func fetchShareableContent() async throws -> SCShareableContent {
-        try await withCheckedThrowingContinuation { continuation in
-            SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let content {
-                    continuation.resume(returning: content)
-                } else {
-                    continuation.resume(throwing: MinuteError.audioExportFailed)
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.fetchShareableContent(
+            excludingDesktopWindows: false,
+            onScreenWindowsOnly: true,
+            fallbackError: MinuteError.audioExportFailed
+        )
     }
 
     static func startCapture(_ stream: SCStream) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            stream.startCapture { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.startCapture(stream: stream)
     }
 
     static func stopCapture(_ stream: SCStream) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            stream.stopCapture { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.stopCapture(stream: stream)
     }
 }
 

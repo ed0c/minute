@@ -22,6 +22,7 @@ struct PipelineContentView: View {
     @State private var sessionDropErrorMessage: String?
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
     @State private var dismissedStatusDrawerID: String?
+    private let statusPresenter = PipelineStatusPresenter()
 
     private let compactHeightThreshold: CGFloat = 620
     private let floatingBarHeight: CGFloat = 88
@@ -322,167 +323,53 @@ struct PipelineContentView: View {
     }
 
     private var statusDrawerModel: StatusDrawerModel? {
-        if let dismissibleID = dismissibleStatusDrawerID(for: model.state),
-           dismissibleID == dismissedStatusDrawerID {
-            return nil
-        }
-
-        if case .recording = model.state,
-           let warningDetail = recordingWarningDetailText() {
-            return StatusDrawerModel(
-                title: "Do you want to keep recording?",
-                detail: warningDetail,
-                progress: nil,
-                showsActivity: false,
-                isError: true,
-                actionTitle: "Keep Recording",
-                action: { model.keepRecordingFromWarning() },
-                secondaryActionTitle: nil,
-                secondaryAction: nil
-            )
-        }
-
-        if model.backgroundProcessingSnapshot.activeMeetingID != nil {
-            let stage = model.backgroundProcessingSnapshot.activeStage
-            let progress = model.backgroundProcessingSnapshot.activeProgress
-            let isDeferred = model.screenInferenceStatus?.isFirstInferenceDeferred == true
-            let hasPending = model.backgroundProcessingSnapshot.pendingMeetingID != nil
-
-            let title: String
-            switch stage {
-            case .downloadingModels:
-                title = "Downloading Models"
-            case .transcribing:
-                title = "Transcribing"
-            case .summarizing:
-                title = "Summarizing"
-            case .writing:
-                title = "Writing"
-            case nil:
-                title = "Processing"
-            }
-
-            let baseDetail = isDeferred
-                ? "Your recorded meeting is processing. Screen context disabled until processing is done."
-                : "Your recorded meeting is processing in the background."
-
-            let detail = hasPending
-                ? baseDetail + " Another meeting is pending next."
-                : baseDetail
-
-            return StatusDrawerModel(
-                title: title,
-                detail: detail,
-                progress: progress,
-                showsActivity: progress == nil,
-                isError: false,
-                actionTitle: "Cancel",
-                action: { model.cancelBackgroundProcessing(clearPending: true) },
-                secondaryActionTitle: nil,
-                secondaryAction: nil
-            )
-        }
-
-        if case .idle = model.state {
-            switch model.backgroundProcessingSnapshot.lastOutcome {
-            case .failed(let message):
-                return StatusDrawerModel(
-                    title: "Processing failed",
-                    detail: message,
-                    progress: nil,
-                    showsActivity: false,
-                    isError: true,
-                    actionTitle: "Retry",
-                    action: { model.retryBackgroundProcessing() },
-                    secondaryActionTitle: nil,
-                    secondaryAction: nil
-                )
-            case .canceled:
-                return StatusDrawerModel(
-                    title: "Processing was canceled",
-                    detail: "You can retry this meeting later.",
-                    progress: nil,
-                    showsActivity: false,
-                    isError: false,
-                    actionTitle: "Retry",
-                    action: { model.retryBackgroundProcessing() },
-                    secondaryActionTitle: nil,
-                    secondaryAction: nil
-                )
-            case .completed, nil:
-                break
-            }
-        }
-
-        if case .idle = model.state,
-           let recovery = model.recoverableRecordings.first {
-            let folderName = recovery.sessionURL.lastPathComponent
-            return StatusDrawerModel(
-                title: "Unfinished meeting found",
-                detail: "An unfinished meeting was found in \(folderName). Do you want to recover it?",
-                progress: nil,
-                showsActivity: false,
-                isError: false,
-                actionTitle: "Recover",
-                action: { model.recoverRecording(recovery) },
-                secondaryActionTitle: "Delete",
-                secondaryAction: { model.discardRecoverableRecording(recovery) }
-            )
-        }
-
-        switch model.state {
-        case .recorded:
-            return StatusDrawerModel(
-                title: "Recording ready",
-                detail: "This meeting is ready to process.",
-                progress: nil,
-                showsActivity: false,
-                isError: false,
-                actionTitle: "Process",
-                action: { model.send(.process) },
-                secondaryActionTitle: nil,
-                secondaryAction: nil
-            )
-        case .processing, .writing, .importing:
-            return StatusDrawerModel(
-                title: model.state.statusLabel,
-                detail: "Meeting is being processed.",
+        guard let presentation = statusPresenter.presentation(
+            for: PipelineStatusPresenter.Input(
+                state: model.state,
+                backgroundProcessingSnapshot: model.backgroundProcessingSnapshot,
+                isFirstScreenInferenceDeferred: model.screenInferenceStatus?.isFirstInferenceDeferred == true,
                 progress: model.progress,
-                showsActivity: model.progress == nil,
-                isError: false,
-                actionTitle: nil,
-                action: nil,
-                secondaryActionTitle: nil,
-                secondaryAction: nil
-            )
-        case .done(let noteURL, _):
-            return StatusDrawerModel(
-                title: "Meeting ready",
-                detail: "Your note, transcript, and audio are in the vault.",
-                progress: nil,
-                showsActivity: false,
-                isError: false,
-                actionTitle: "Reveal in Finder",
-                action: { model.revealInFinder(noteURL) },
-                secondaryActionTitle: nil,
-                secondaryAction: nil,
-                onClose: { dismissCurrentStatusDrawer() }
-            )
-        case .failed(let error, _):
-            return StatusDrawerModel(
-                title: "Processing failed",
-                detail: ErrorHandler.userMessage(for: error, fallback: "Processing failed."),
-                progress: nil,
-                showsActivity: false,
-                isError: true,
-                actionTitle: nil,
-                action: nil,
-                secondaryActionTitle: nil,
-                secondaryAction: nil,
-                onClose: { dismissCurrentStatusDrawer() }
-            )
-        default:
+                recoverableRecordings: model.recoverableRecordings,
+                recordingWarningDetail: recordingWarningDetailText()
+            ),
+            dismissedStatusDrawerID: dismissedStatusDrawerID
+        ) else {
             return nil
+        }
+
+        return StatusDrawerModel(
+            title: presentation.title,
+            detail: presentation.detail,
+            progress: presentation.progress,
+            showsActivity: presentation.showsActivity,
+            isError: presentation.isError,
+            actionTitle: presentation.primaryActionTitle,
+            action: statusAction(for: presentation.primaryAction),
+            secondaryActionTitle: presentation.secondaryActionTitle,
+            secondaryAction: statusAction(for: presentation.secondaryAction),
+            onClose: presentation.showsCloseButton ? { dismissCurrentStatusDrawer() } : nil
+        )
+    }
+
+    private func statusAction(for action: PipelineStatusPresenter.Action?) -> (() -> Void)? {
+        guard let action else { return nil }
+        return {
+            switch action {
+            case .keepRecording:
+                model.keepRecordingFromWarning()
+            case .cancelBackgroundProcessing(let clearPending):
+                model.cancelBackgroundProcessing(clearPending: clearPending)
+            case .retryBackgroundProcessing:
+                model.retryBackgroundProcessing()
+            case .recoverRecording(let recording):
+                model.recoverRecording(recording)
+            case .discardRecoverableRecording(let recording):
+                model.discardRecoverableRecording(recording)
+            case .process:
+                model.send(.process)
+            case .revealInFinder(let noteURL):
+                model.revealInFinder(noteURL)
+            }
         }
     }
 
@@ -514,25 +401,14 @@ struct PipelineContentView: View {
     }
 
     private func dismissCurrentStatusDrawer() {
-        guard let id = dismissibleStatusDrawerID(for: model.state) else { return }
+        guard let id = statusPresenter.dismissibleStatusDrawerID(for: model.state) else { return }
         dismissedStatusDrawerID = id
     }
 
     private func syncDismissedStatusDrawer(with state: MeetingPipelineState) {
         guard let dismissedStatusDrawerID else { return }
-        if dismissibleStatusDrawerID(for: state) != dismissedStatusDrawerID {
+        if statusPresenter.dismissibleStatusDrawerID(for: state) != dismissedStatusDrawerID {
             self.dismissedStatusDrawerID = nil
-        }
-    }
-
-    private func dismissibleStatusDrawerID(for state: MeetingPipelineState) -> String? {
-        switch state {
-        case .recorded(let audioTempURL, _, let startedAt, let stoppedAt):
-            return "recorded:\(audioTempURL.path):\(startedAt.timeIntervalSinceReferenceDate):\(stoppedAt.timeIntervalSinceReferenceDate)"
-        case .done(let noteURL, _):
-            return "done:\(noteURL.path)"
-        default:
-            return nil
         }
     }
 

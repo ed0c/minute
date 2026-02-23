@@ -1,5 +1,4 @@
 import CoreGraphics
-import CoreVideo
 import Foundation
 @preconcurrency import ScreenCaptureKit
 import os
@@ -385,36 +384,21 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
         filter: SCContentFilter,
         configuration: SCStreamConfiguration
     ) async throws -> CGImage {
-        try await withCheckedThrowingContinuation { continuation in
-            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: MinuteError.screenCaptureUnavailable)
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.captureImage(
+            contentFilter: filter,
+            configuration: configuration,
+            fallbackError: MinuteError.screenCaptureUnavailable
+        )
     }
 
     private static func makeScreenshotConfiguration(for filter: SCContentFilter) -> SCStreamConfiguration {
-        let configuration = SCStreamConfiguration()
-        configuration.capturesAudio = false
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.showsCursor = false
-        configuration.scalesToFit = false
-
-        let rect = filter.contentRect
-        if rect.width > 0, rect.height > 0 {
-            let scale = CGFloat(filter.pointPixelScale)
-            let width = max(1, Int(rect.width * scale))
-            let height = max(1, Int(rect.height * scale))
-            configuration.width = size_t(width)
-            configuration.height = size_t(height)
-        }
-
-        return configuration
+        ScreenCaptureKitAdapter.makeScreenshotConfiguration(
+            contentRect: filter.contentRect,
+            pointPixelScale: CGFloat(filter.pointPixelScale),
+            capturesAudio: false,
+            showsCursor: false,
+            scalesToFit: false
+        )
     }
 
     static func resolveWindows(for selections: [ScreenContextWindowSelection]) async throws -> [ResolvedWindow] {
@@ -453,17 +437,11 @@ private final class ScreenContextCaptureSession: @unchecked Sendable {
     }
 
     private static func fetchShareableContent() async throws -> SCShareableContent {
-        try await withCheckedThrowingContinuation { continuation in
-            SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { content, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let content {
-                    continuation.resume(returning: content)
-                } else {
-                    continuation.resume(throwing: MinuteError.screenCaptureUnavailable)
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.fetchShareableContent(
+            excludingDesktopWindows: true,
+            onScreenWindowsOnly: false,
+            fallbackError: MinuteError.screenCaptureUnavailable
+        )
     }
 }
 

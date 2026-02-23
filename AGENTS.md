@@ -155,6 +155,8 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
 - Local app settings persistence for global vocabulary config + session-scoped in-memory override state; no new vault output files (011-vocabulary-boosting)
 - Swift (SwiftUI app target, Swift package modules) + SwiftUI, AppKit, Combine, MinuteCore, existing settings view models/services (012-settings-improvements)
 - Existing local settings persistence (`UserDefaults` + local file-backed app state where already used); no new storage systems (012-settings-improvements)
+- Swift 5.9+ (Xcode 15.x), Swift tools 6.2 for `MinuteCore` package + SwiftUI, Combine, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore package modules (013-simplify-architecture)
+- Local files (vault outputs and temporary session artifacts) + local preferences in `UserDefaults` (013-simplify-architecture)
 
 ## Recent Changes
 - 011-vocabulary-boosting: Added Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components

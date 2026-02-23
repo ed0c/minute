@@ -1,0 +1,466 @@
+openapi: 3.0.3
+info:
+  title: Minute Architecture Simplification Contract (Abstract)
+  version: 0.2.0
+  description: |
+    This OpenAPI document models planning and verification contracts for
+    architecture simplification work. Minute is not exposed as an HTTP service;
+    endpoints represent app/documentation workflow boundaries used to track
+    ownership, consolidation, dead-code removal, parity checks, and migration notes.
+    Version 0.2.0 reflects stabilized ownership boundaries and closed dead-code findings.
+
+servers:
+  - url: http://localhost
+
+paths:
+  /architecture/workflow-areas:
+    get:
+      summary: List defined workflow areas and ownership status
+      responses:
+        '200':
+          description: Workflow areas with ownership metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkflowArea'
+
+  /architecture/ownership-map:
+    put:
+      summary: Publish or update ownership map entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/OwnershipMapEntry'
+      responses:
+        '200':
+          description: Ownership map accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnershipMapResult'
+        '409':
+          description: Ownership conflicts detected
+
+  /architecture/shared-behaviors/consolidate:
+    post:
+      summary: Register consolidation of duplicated behavior into a canonical owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharedBehaviorConsolidationRequest'
+      responses:
+        '200':
+          description: Consolidation state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedBehaviorUnit'
+
+  /architecture/dead-code/findings:
+    post:
+      summary: Create dead-code finding for review and removal workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeadCodeFinding'
+      responses:
+        '201':
+          description: Dead-code finding created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadCodeFinding'
+
+  /architecture/dead-code/findings/{findingId}/remove:
+    post:
+      summary: Mark dead-code finding removed after parity checkpoints pass
+      parameters:
+        - in: path
+          name: findingId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeadCodeRemovalRequest'
+      responses:
+        '200':
+          description: Dead-code finding moved to removed state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadCodeFinding'
+        '412':
+          description: Required parity checkpoints have not passed
+
+  /architecture/parity-checkpoints:
+    get:
+      summary: Retrieve behavior parity checkpoint statuses
+      responses:
+        '200':
+          description: List of parity checkpoints
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BehaviorParityCheckpoint'
+
+  /architecture/parity-checkpoints/{checkpointId}/verify:
+    post:
+      summary: Record before/after parity verification result for a checkpoint
+      parameters:
+        - in: path
+          name: checkpointId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParityVerificationRequest'
+      responses:
+        '200':
+          description: Checkpoint verification recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BehaviorParityCheckpoint'
+
+  /architecture/migration-note:
+    post:
+      summary: Publish migration note entries for contributor navigation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/MigrationNoteEntry'
+      responses:
+        '200':
+          description: Migration notes published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationNotePublishResult'
+
+components:
+  schemas:
+    WorkflowArea:
+      type: object
+      required:
+        - areaId
+        - name
+        - scope
+        - entryPoints
+        - ownerModules
+        - status
+      properties:
+        areaId:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+        entryPoints:
+          type: array
+          items:
+            type: string
+        ownerModules:
+          type: array
+          items:
+            type: string
+        outOfScopeModules:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+            - baseline
+            - refactoring
+            - stabilized
+
+    OwnershipMapEntry:
+      type: object
+      required:
+        - entryId
+        - workflowAreaId
+        - ownedPath
+        - responsibility
+        - lastReviewedAt
+        - reviewStatus
+      properties:
+        entryId:
+          type: string
+        workflowAreaId:
+          type: string
+        ownedPath:
+          type: string
+        responsibility:
+          type: string
+        allowedDependencies:
+          type: array
+          items:
+            type: string
+        lastReviewedAt:
+          type: string
+          format: date-time
+        reviewStatus:
+          type: string
+          enum:
+            - draft
+            - approved
+            - superseded
+
+    OwnershipMapResult:
+      type: object
+      required:
+        - acceptedCount
+        - conflictCount
+      properties:
+        acceptedCount:
+          type: integer
+          minimum: 0
+        conflictCount:
+          type: integer
+          minimum: 0
+        conflicts:
+          type: array
+          items:
+            type: string
+
+    SharedBehaviorUnit:
+      type: object
+      required:
+        - unitId
+        - behaviorName
+        - canonicalOwnerPath
+        - consumers
+        - replacedSources
+        - state
+      properties:
+        unitId:
+          type: string
+        behaviorName:
+          type: string
+        canonicalOwnerPath:
+          type: string
+        consumers:
+          type: array
+          items:
+            type: string
+        replacedSources:
+          type: array
+          items:
+            type: string
+        state:
+          type: string
+          enum:
+            - identified
+            - consolidating
+            - consolidated
+            - verified
+
+    SharedBehaviorConsolidationRequest:
+      type: object
+      required:
+        - unitId
+        - behaviorName
+        - canonicalOwnerPath
+        - consumers
+        - replacedSources
+      properties:
+        unitId:
+          type: string
+        behaviorName:
+          type: string
+        canonicalOwnerPath:
+          type: string
+        consumers:
+          type: array
+          items:
+            type: string
+        replacedSources:
+          type: array
+          items:
+            type: string
+
+    DeadCodeFinding:
+      type: object
+      required:
+        - findingId
+        - path
+        - category
+        - evidence
+        - removalScope
+        - parityCheckpointIds
+        - status
+      properties:
+        findingId:
+          type: string
+        path:
+          type: string
+        category:
+          type: string
+          enum:
+            - unused
+            - unreachable
+            - redundant_duplicate
+            - obsolete_scaffold
+        evidence:
+          type: array
+          items:
+            type: string
+        removalScope:
+          type: string
+        parityCheckpointIds:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+            - open
+            - approved_for_removal
+            - removed
+            - rejected
+
+    DeadCodeRemovalRequest:
+      type: object
+      required:
+        - parityCheckpointIds
+        - removalSummary
+      properties:
+        parityCheckpointIds:
+          type: array
+          items:
+            type: string
+        removalSummary:
+          type: string
+
+    BehaviorParityCheckpoint:
+      type: object
+      required:
+        - checkpointId
+        - workflowAreaId
+        - scenario
+        - verificationType
+        - beforeResult
+        - afterResult
+        - status
+      properties:
+        checkpointId:
+          type: string
+        workflowAreaId:
+          type: string
+        scenario:
+          type: string
+        verificationType:
+          type: string
+          enum:
+            - automated_test
+            - manual_regression
+            - both
+        beforeResult:
+          type: string
+          enum:
+            - pass
+            - fail
+            - not_run
+        afterResult:
+          type: string
+          enum:
+            - pass
+            - fail
+            - not_run
+        status:
+          type: string
+          enum:
+            - pending
+            - in_progress
+            - passed
+            - failed
+        notes:
+          type: string
+          nullable: true
+
+    ParityVerificationRequest:
+      type: object
+      required:
+        - beforeResult
+        - afterResult
+      properties:
+        beforeResult:
+          type: string
+          enum:
+            - pass
+            - fail
+            - not_run
+        afterResult:
+          type: string
+          enum:
+            - pass
+            - fail
+            - not_run
+        notes:
+          type: string
+          nullable: true
+
+    MigrationNoteEntry:
+      type: object
+      required:
+        - noteId
+        - changeType
+        - impactSummary
+        - effectiveVersion
+      properties:
+        noteId:
+          type: string
+        changeType:
+          type: string
+          enum:
+            - moved
+            - renamed
+            - deleted
+            - consolidated
+        oldLocation:
+          type: string
+          nullable: true
+        newLocation:
+          type: string
+          nullable: true
+        impactSummary:
+          type: string
+        effectiveVersion:
+          type: string
+
+    MigrationNotePublishResult:
+      type: object
+      required:
+        - publishedCount
+      properties:
+        publishedCount:
+          type: integer
+          minimum: 0
+        warnings:
+          type: array
+          items:
+            type: string

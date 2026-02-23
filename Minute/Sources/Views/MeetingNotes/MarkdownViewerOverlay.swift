@@ -1,5 +1,6 @@
 import AppKit
 import MarkdownUI
+import MinuteCore
 import SwiftUI
 
 struct MarkdownViewerOverlay: View {
@@ -291,7 +292,7 @@ struct MarkdownViewerOverlay: View {
                   !activeRenderPlainText,
                   let editor = speakerEditor,
                   let transcript = (rawTranscriptContent ?? transcriptContent),
-                  TranscriptLineParser.containsSpeakerHeader(transcript) {
+                  MeetingNoteParsing.containsSpeakerHeader(transcript) {
             InteractiveTranscriptView(
                 transcript: transcript,
                 speakerName: editor.speakerName,
@@ -506,13 +507,13 @@ private struct InteractiveTranscriptView: View {
     let saveSpeakerNames: () -> Void
 
     var body: some View {
-        let (header, body) = TranscriptLineParser.splitHeaderAndBody(transcript)
-        let lines = TranscriptLineParser.parse(body)
+        let split = MeetingNoteParsing.splitTranscriptHeaderAndBody(transcript)
+        let lines = MeetingNoteParsing.parseTranscriptLines(split.body)
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
-                if !header.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Markdown(Frontmatter.decorateContent(header))
+                if !split.header.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Markdown(Frontmatter.decorateContent(split.header))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.bottom, 12)
                 }
@@ -563,11 +564,6 @@ private struct InteractiveTranscriptView: View {
     }
 }
 
-private enum TranscriptLine: Equatable {
-    case speakerHeader(TranscriptSpeakerHeader)
-    case text(String)
-}
-
 enum TranscriptSpeakerColorResolver {
     static func color(for speakerID: Int) -> Color {
         let hue = CGFloat(TranscriptSpeakerHueResolver.hue(for: speakerID))
@@ -589,104 +585,8 @@ enum TranscriptSpeakerHueResolver {
     }
 }
 
-private struct TranscriptSpeakerHeader: Equatable {
-    var speakerId: Int
-    var detectedName: String?
-    var suffix: String
-}
-
-private enum TranscriptLineParser {
-    /// Deterministic parser for speaker header lines.
-    ///
-    /// Supported formats (examples):
-    /// - `Speaker 1 (Einar) [00:00 - 00:43] ...`
-    /// - `Speaker 3 [01:04 - 01:12] ...`
-    ///
-    /// Parsing strategy:
-    /// - Only recognizes lines whose trimmed prefix starts with `Speaker <digits>`
-    /// - Captures optional `(Name)` that appears immediately after the id
-    /// - Captures the suffix starting at the first ` [` (bracketed time range + trailing text)
-    static func parse(_ transcript: String) -> [TranscriptLine] {
-        let lines = transcript.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.map { sub in
-            let line = String(sub)
-            if let header = parseSpeakerHeader(line) {
-                return .speakerHeader(header)
-            }
-            return .text(line)
-        }
-    }
-
-    static func splitHeaderAndBody(_ transcript: String) -> (header: String, body: String) {
-        let lines = transcript.split(separator: "\n", omittingEmptySubsequences: false)
-
-        var firstHeaderIndex: Int?
-        for (index, lineSub) in lines.enumerated() {
-            if parseSpeakerHeader(String(lineSub)) != nil {
-                firstHeaderIndex = index
-                break
-            }
-        }
-
-        guard let firstHeaderIndex else {
-            return (header: transcript, body: "")
-        }
-
-        let headerLines = lines.prefix(firstHeaderIndex)
-        let bodyLines = lines.suffix(from: firstHeaderIndex)
-
-        return (
-            header: headerLines.joined(separator: "\n"),
-            body: bodyLines.joined(separator: "\n")
-        )
-    }
-
-    static func containsSpeakerHeader(_ transcript: String) -> Bool {
-        for lineSub in transcript.split(separator: "\n", omittingEmptySubsequences: false) {
-            if parseSpeakerHeader(String(lineSub)) != nil {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func parseSpeakerHeader(_ line: String) -> TranscriptSpeakerHeader? {
-        let leadingWhitespace = line.prefix { $0.isWhitespace }
-        let remainder = line.dropFirst(leadingWhitespace.count)
-        let trimmed = remainder.trimmingCharacters(in: .whitespaces)
-
-        guard trimmed.hasPrefix("Speaker ") else { return nil }
-
-        let afterPrefix = trimmed.dropFirst("Speaker ".count)
-        let digits = afterPrefix.prefix { $0.isNumber }
-        guard let speakerId = Int(digits) else { return nil }
-
-        let afterDigits = afterPrefix.dropFirst(digits.count)
-        var detectedName: String?
-
-        let afterDigitsTrimmed = afterDigits.trimmingCharacters(in: .whitespaces)
-        if afterDigitsTrimmed.hasPrefix("(") {
-            if let closeIndex = afterDigitsTrimmed.firstIndex(of: ")") {
-                let nameRange = afterDigitsTrimmed.index(after: afterDigitsTrimmed.startIndex)..<closeIndex
-                let name = String(afterDigitsTrimmed[nameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty {
-                    detectedName = name
-                }
-            }
-        }
-
-        guard let bracketRange = trimmed.range(of: " [") else {
-            // No canonical time bracket means we treat it as a normal line to avoid false positives.
-            return nil
-        }
-
-        let suffix = String(trimmed[bracketRange.lowerBound...])
-        return TranscriptSpeakerHeader(speakerId: speakerId, detectedName: detectedName, suffix: suffix)
-    }
-}
-
 private struct SpeakerHeaderRow: View {
-    let header: TranscriptSpeakerHeader
+    let header: MeetingNoteParsing.SpeakerHeader
     let speakerColor: Color
     let currentDisplayName: String?
     let knownProfileNames: [String]
