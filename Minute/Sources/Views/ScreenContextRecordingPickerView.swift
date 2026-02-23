@@ -1,5 +1,4 @@
 import AppKit
-import CoreVideo
 import MinuteCore
 import ScreenCaptureKit
 import SwiftUI
@@ -522,17 +521,11 @@ struct ScreenContextWindowPickerPopover: View {
     }
 
     private func fetchShareableContent() async throws -> SCShareableContent {
-        try await withCheckedThrowingContinuation { continuation in
-            SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { content, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let content {
-                    continuation.resume(returning: content)
-                } else {
-                    continuation.resume(throwing: MinuteError.screenCaptureUnavailable)
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.fetchShareableContent(
+            excludingDesktopWindows: true,
+            onScreenWindowsOnly: false,
+            fallbackError: MinuteError.screenCaptureUnavailable
+        )
     }
 
     private func captureWindowThumbnail(for window: SCWindow) async throws -> NSImage {
@@ -546,40 +539,22 @@ struct ScreenContextWindowPickerPopover: View {
         filter: SCContentFilter,
         configuration: SCStreamConfiguration
     ) async throws -> CGImage {
-        try await withCheckedThrowingContinuation { continuation in
-            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: MinuteError.screenCaptureUnavailable)
-                }
-            }
-        }
+        try await ScreenCaptureKitAdapter.captureImage(
+            contentFilter: filter,
+            configuration: configuration,
+            fallbackError: MinuteError.screenCaptureUnavailable
+        )
     }
 
     private func makeScreenshotConfiguration(for filter: SCContentFilter) -> SCStreamConfiguration {
-        let configuration = SCStreamConfiguration()
-        configuration.capturesAudio = false
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.showsCursor = false
-        configuration.scalesToFit = true
-
-        let rect = filter.contentRect
-        guard rect.width > 0, rect.height > 0 else {
-            return configuration
-        }
-
-        let scale = CGFloat(filter.pointPixelScale)
-        let sourceWidth = rect.width * scale
-        let sourceHeight = rect.height * scale
-        let maxDimension: CGFloat = 560
-        let fitRatio = min(1.0, maxDimension / max(sourceWidth, sourceHeight))
-
-        configuration.width = size_t(max(1, Int(sourceWidth * fitRatio)))
-        configuration.height = size_t(max(1, Int(sourceHeight * fitRatio)))
-        return configuration
+        ScreenCaptureKitAdapter.makeScreenshotConfiguration(
+            contentRect: filter.contentRect,
+            pointPixelScale: CGFloat(filter.pointPixelScale),
+            capturesAudio: false,
+            showsCursor: false,
+            scalesToFit: true,
+            maxDimension: 560
+        )
     }
 }
 

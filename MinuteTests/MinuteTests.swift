@@ -11,6 +11,172 @@ struct MinuteTests {
 }
 
 @MainActor
+struct ArchitectureDeadCodeParityTests {
+    @Test
+    func defaultsObserver_sameSnapshot_reportsNoChanges() {
+        let suite = "ArchitectureDeadCodeParityTests.defaults.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = GlobalVocabularyBoostingSettings.default
+        let snapshot = PipelineDefaultsObserver.makeSnapshot(
+            defaults: defaults,
+            transcriptionBackendID: TranscriptionBackend.whisper.id,
+            vocabularySettings: settings
+        )
+
+        let changed = PipelineDefaultsObserver.changedDomains(previous: snapshot, current: snapshot)
+        #expect(changed.hasChanges == false)
+    }
+
+    @Test
+    func meetingNoteParsing_withoutSpeakerHeaders_keepsBodyInHeaderSection() {
+        let transcript = """
+        Intro line
+        Another line
+        """
+        let split = MeetingNoteParsing.splitTranscriptHeaderAndBody(transcript)
+
+        #expect(split.header == transcript)
+        #expect(split.body.isEmpty)
+    }
+}
+
+@MainActor
+struct PipelineStatusPresenterParityTests {
+    @Test
+    func recordedState_returnsProcessAction() {
+        let presenter = PipelineStatusPresenter()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let stoppedAt = startedAt.addingTimeInterval(120)
+        let state = MeetingPipelineState.recorded(
+            audioTempURL: URL(fileURLWithPath: "/tmp/input.wav"),
+            durationSeconds: stoppedAt.timeIntervalSince(startedAt),
+            startedAt: startedAt,
+            stoppedAt: stoppedAt
+        )
+
+        let presentation = presenter.presentation(
+            for: PipelineStatusPresenter.Input(
+                state: state,
+                backgroundProcessingSnapshot: BackgroundProcessingSnapshot(),
+                isFirstScreenInferenceDeferred: false,
+                progress: nil,
+                recoverableRecordings: [],
+                recordingWarningDetail: nil
+            ),
+            dismissedStatusDrawerID: nil
+        )
+
+        #expect(presentation?.primaryAction == .process)
+    }
+}
+
+@MainActor
+struct PipelineDefaultsObserverParityTests {
+    @Test
+    func changedDomains_whenTranscriptionBackendChanges_marksDomainOnly() {
+        let suite = "PipelineDefaultsObserverParityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let baseline = PipelineDefaultsObserver.makeSnapshot(
+            defaults: defaults,
+            transcriptionBackendID: TranscriptionBackend.whisper.id,
+            vocabularySettings: .default
+        )
+        let changed = PipelineDefaultsObserver.makeSnapshot(
+            defaults: defaults,
+            transcriptionBackendID: TranscriptionBackend.fluidAudio.id,
+            vocabularySettings: .default
+        )
+
+        let domains = PipelineDefaultsObserver.changedDomains(previous: baseline, current: changed)
+        #expect(domains.transcriptionBackendChanged)
+        #expect(domains.vaultStatusChanged == false)
+        #expect(domains.outputLanguageChanged == false)
+    }
+}
+
+@MainActor
+struct MeetingNotesOverlayStateParityTests {
+    @Test
+    func selectAndDismiss_transitionsAreDeterministic() {
+        var state = MeetingNotesOverlayState()
+        let item = MeetingNoteItem(
+            title: "Test",
+            date: Date(timeIntervalSince1970: 0),
+            relativePath: "Meetings/test.md",
+            fileURL: URL(fileURLWithPath: "/tmp/test.md"),
+            hasTranscript: false,
+            transcriptURL: nil
+        )
+
+        state.select(item)
+        #expect(state.isPresented)
+        #expect(state.selectedItem == item)
+
+        state.selectTab(.transcription)
+        #expect(state.selectedTab == .transcription)
+
+        state.dismiss()
+        #expect(state.isPresented == false)
+        #expect(state.selectedItem == nil)
+        #expect(state.selectedTab == .summary)
+    }
+}
+
+@MainActor
+struct ModelSetupLifecycleParityCoverageTests {
+    @Test
+    func refresh_whenModelsReady_setsReadyState() async throws {
+        let manager = LifecycleModelManagerStub(
+            validations: [ModelValidationResult(missingModelIDs: [], invalidModelIDs: [])]
+        )
+        let controller = ModelSetupLifecycleController(
+            modelManager: manager,
+            displayName: { $0 }
+        )
+
+        controller.refresh()
+
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run {
+                if case .ready = controller.state {
+                    return true
+                }
+                return false
+            }
+        }
+    }
+}
+
+private actor LifecycleModelManagerStub: ModelManaging {
+    private var validations: [ModelValidationResult]
+
+    init(validations: [ModelValidationResult]) {
+        self.validations = validations
+    }
+
+    func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws {
+        progress?(ModelDownloadProgress(fractionCompleted: 1, label: "done"))
+    }
+
+    func validateModels() async throws -> ModelValidationResult {
+        if validations.count > 1 {
+            return validations.removeFirst()
+        }
+        return validations.first ?? ModelValidationResult(missingModelIDs: [], invalidModelIDs: [])
+    }
+
+    func removeModels(withIDs ids: [String]) async throws {
+        _ = ids
+    }
+}
+
+@MainActor
 struct SettingsWorkspaceRoutingCoverageTests {
     @Test
     func settingsOpensInSingleWindowRoute() {
@@ -150,7 +316,7 @@ struct MeetingNotesBrowserViewModelSpeakerDraftIsolationTests {
         Again
         """
 
-        let ids = MeetingNotesBrowserViewModel.parseSpeakerIDs(fromTranscriptMarkdown: transcript)
+        let ids = MeetingNoteParsing.parseSpeakerIDs(fromTranscriptMarkdown: transcript)
         #expect(ids == [2, 10])
     }
 
@@ -167,7 +333,7 @@ struct MeetingNotesBrowserViewModelSpeakerDraftIsolationTests {
         Unchanged
         """
 
-        let rewritten = MeetingNotesBrowserViewModel.rewriteSpeakerHeadingsForDisplay(
+        let rewritten = MeetingNoteParsing.rewriteSpeakerHeadingsForDisplay(
             transcriptMarkdown: transcript,
             speakerDisplayNames: [1: "Alice", 2: " Bob "]
         )
@@ -175,6 +341,86 @@ struct MeetingNotesBrowserViewModelSpeakerDraftIsolationTests {
         #expect(rewritten.contains("Alice [00:00]"))
         #expect(rewritten.contains("Bob [00:05]"))
         #expect(rewritten.contains("Speaker 3"))
+    }
+
+    @MainActor
+    @Test
+    func selectingDifferentNotes_resetsSpeakerDraftState() async throws {
+        let first = MeetingNoteItem(
+            title: "First",
+            date: Date(timeIntervalSince1970: 0),
+            relativePath: "Meetings/2026/02/first.md",
+            fileURL: URL(fileURLWithPath: "/tmp/first.md"),
+            hasTranscript: true,
+            transcriptURL: URL(fileURLWithPath: "/tmp/first.transcript.md")
+        )
+        let second = MeetingNoteItem(
+            title: "Second",
+            date: Date(timeIntervalSince1970: 1),
+            relativePath: "Meetings/2026/02/second.md",
+            fileURL: URL(fileURLWithPath: "/tmp/second.md"),
+            hasTranscript: true,
+            transcriptURL: URL(fileURLWithPath: "/tmp/second.transcript.md")
+        )
+
+        let browser = SpeakerDraftIsolationBrowserStub(
+            notes: [first, second],
+            noteByID: [
+                first.id: "# First\n\n",
+                second.id: "# Second\n\n",
+            ],
+            transcriptByID: [
+                first.id: "Speaker 1 [00:00]\nHello",
+                second.id: "Speaker 2 [00:00]\nHi",
+            ]
+        )
+        let model = MeetingNotesBrowserViewModel(browserProvider: { browser })
+
+        model.refresh()
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run { model.notes.count == 2 && !model.isRefreshing }
+        }
+
+        model.select(first)
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run { model.speakerIDs == [1] }
+        }
+        model.setSpeakerName("Alice", for: 1)
+        #expect(model.speakerName(for: 1) == "Alice")
+
+        model.select(second)
+        try await eventually(timeoutNanoseconds: 1_000_000_000) {
+            await MainActor.run { model.speakerIDs == [2] }
+        }
+        #expect(model.speakerName(for: 1).isEmpty)
+    }
+}
+
+private actor SpeakerDraftIsolationBrowserStub: MeetingNotesBrowsing {
+    private let notes: [MeetingNoteItem]
+    private let noteByID: [String: String]
+    private let transcriptByID: [String: String]
+
+    init(notes: [MeetingNoteItem], noteByID: [String: String], transcriptByID: [String: String]) {
+        self.notes = notes
+        self.noteByID = noteByID
+        self.transcriptByID = transcriptByID
+    }
+
+    func listNotes() async throws -> [MeetingNoteItem] {
+        notes
+    }
+
+    func loadNoteContent(for item: MeetingNoteItem) async throws -> String {
+        noteByID[item.id] ?? ""
+    }
+
+    func loadTranscriptContent(for item: MeetingNoteItem) async throws -> String {
+        transcriptByID[item.id] ?? ""
+    }
+
+    func deleteNoteFiles(for item: MeetingNoteItem) async throws {
+        _ = item
     }
 }
 

@@ -207,7 +207,6 @@ public actor MeetingPipelineCoordinator {
                 let decoded = try decodeExtractionStrict(from: repaired)
                 return MeetingExtractionValidation.validated(decoded, recordingDate: meetingDate)
             } catch {
-                // Task 07: proceed with a fallback extraction rather than failing the entire pipeline.
                 logger.error("Extraction still invalid after repair; proceeding with fallback")
                 return MeetingExtractionValidation.fallback(recordingDate: meetingDate)
             }
@@ -292,7 +291,7 @@ public actor MeetingPipelineCoordinator {
             // Note
             try vaultWriter.writeAtomically(data: noteData, to: noteURL)
 
-            // Audio (temporary implementation reads into memory; task 08 will stream/copy atomically).
+            // Audio
             let audioURL: URL?
             if let audioRelativePath = resolvedPaths.audioRelativePath {
                 guard let audioData = originalAudioData else {
@@ -318,7 +317,9 @@ public actor MeetingPipelineCoordinator {
         let fileManager = FileManager.default
 
         func normalizeRelativePath(_ relativePath: String) -> String {
-            relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+            VaultPathNormalizer
+                .normalizedRelativeComponents(relativePath)
+                .joined(separator: "/")
         }
 
         let noteRelativePath = normalizeRelativePath(noteRelativePath)

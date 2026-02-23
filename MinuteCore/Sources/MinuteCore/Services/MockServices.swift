@@ -13,7 +13,7 @@ public struct DefaultVaultWriter: VaultWriting {
     }
 }
 
-// MARK: - Mocks (used until tasks 04–09 replace them)
+// MARK: - Mocks
 
 @preconcurrency
 public final class MockAudioService: AudioServicing, AudioLevelMetering, AudioCaptureControlling, @unchecked Sendable {
@@ -33,7 +33,6 @@ public final class MockAudioService: AudioServicing, AudioLevelMetering, AudioCa
 
     public func stopRecording() async throws -> AudioCaptureResult {
         guard isRecording else {
-            // For now treat as generic failure.
             throw MinuteError.audioExportFailed
         }
 
@@ -42,13 +41,11 @@ public final class MockAudioService: AudioServicing, AudioLevelMetering, AudioCa
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("minute-capture-\(UUID().uuidString).wav")
 
-        // Placeholder data.
         try Data().write(to: url, options: [.atomic])
         return AudioCaptureResult(wavURL: url, duration: 0)
     }
 
     public func convertToContractWav(inputURL: URL, outputURL: URL) async throws {
-        // Placeholder: just copy bytes.
         let data = try Data(contentsOf: inputURL)
         try data.write(to: outputURL, options: [.atomic])
     }
@@ -202,7 +199,6 @@ public struct MockSummarizationService: SummarizationServicing {
     }
 
     public func repairJSON(_ invalidJSON: String) async throws -> String {
-        // Naive repair: return original. Task 07 will implement real validation/repair behavior.
         try await Task.sleep(nanoseconds: 200_000_000)
         return invalidJSON
     }
@@ -211,7 +207,6 @@ public struct MockSummarizationService: SummarizationServicing {
 public struct MockModelManager: ModelManaging {
     public init() {}
     public func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws {
-        // No-op for now.
         _ = progress
     }
 

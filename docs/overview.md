@@ -87,6 +87,18 @@ UI stays thin; business logic lives in MinuteCore. The pipeline is a single
 source-of-truth state machine. Models only emit JSON; Markdown is rendered
 deterministically.
 
+Ownership highlights (013 simplification)
+- Pipeline status presentation and defaults observation are isolated in
+  `PipelineStatusPresenter` and `PipelineDefaultsObserver`.
+- Shared model validation/download lifecycle is centralized in
+  `ModelSetupLifecycleController`.
+- Meeting-note parsing/transforms are centralized in
+  `MinuteCore/Rendering/MeetingNoteParsing`.
+- Vault path normalization is centralized in
+  `MinuteCore/Vault/VaultPathNormalizer`.
+- ScreenCaptureKit async wrappers are centralized in
+  `MinuteCore/Services/ScreenCaptureKitAdapter`.
+
 Core module boundaries (MinuteCore)
 - Domain/types: schemas, file contracts, errors
 - Services: audio, transcription, summarization, vault access, model management

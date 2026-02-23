@@ -11,7 +11,7 @@ public protocol FluidAudioModelManaging: Sendable {
 extension FluidAudioASRModelManager: FluidAudioModelManaging {}
 
 /// Downloads and verifies required local model files under Application Support.
-///<
+///
 /// Networking must only be used for model downloads.
 public actor DefaultModelManager: ModelManaging {
     public struct ModelSpec: Sendable, Equatable {

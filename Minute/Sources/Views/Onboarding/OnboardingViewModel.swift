@@ -14,12 +14,7 @@ final class OnboardingViewModel: ObservableObject {
         case complete
     }
 
-    enum ModelsState: Equatable {
-        case checking
-        case ready
-        case needsDownload(message: String?)
-        case downloading(progress: ModelDownloadProgress?)
-    }
+    typealias ModelsState = ModelSetupLifecycleController.State
 
     @Published private(set) var currentStep: Step = .intro
     @Published private(set) var microphonePermissionGranted = false
@@ -30,42 +25,41 @@ final class OnboardingViewModel: ObservableObject {
         didSet {
             guard oldValue != selectedSummarizationModelID else { return }
             summarizationModelStore.setSelectedModelID(selectedSummarizationModelID)
-            scheduleModelsValidation()
+            modelLifecycleController.refresh()
         }
     }
     @Published var selectedTranscriptionBackendID: String {
         didSet {
             guard oldValue != selectedTranscriptionBackendID else { return }
             transcriptionBackendStore.setSelectedBackendID(selectedTranscriptionBackendID)
-            scheduleModelsValidation()
+            modelLifecycleController.refresh()
         }
     }
     @Published var selectedTranscriptionModelID: String {
         didSet {
             guard oldValue != selectedTranscriptionModelID else { return }
             transcriptionModelStore.setSelectedModelID(selectedTranscriptionModelID)
-            scheduleModelsValidation()
+            modelLifecycleController.refresh()
         }
     }
     @Published var selectedFluidAudioModelID: String {
         didSet {
             guard oldValue != selectedFluidAudioModelID else { return }
             fluidAudioModelStore.setSelectedModelID(selectedFluidAudioModelID)
-            scheduleModelsValidation()
+            modelLifecycleController.refresh()
         }
     }
 
-    private let modelManager: any ModelManaging
     private let defaults: UserDefaults
     private let summarizationModelStore: SummarizationModelSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
+    private let modelLifecycleController: ModelSetupLifecycleController
 
     private var defaultsObserver: AnyCancellable?
     private var observedVaultBookmark: Data?
-    private var modelTask: Task<Void, Never>?
-    private var modelsValidationTask: Task<Void, Never>?
+    private var cancellables: Set<AnyCancellable> = []
 
     private enum DefaultsKey {
         static let didShowIntro = "didShowOnboardingIntro"
@@ -86,7 +80,7 @@ final class OnboardingViewModel: ObservableObject {
         let transcriptionStore = transcriptionModelStore ?? TranscriptionModelSelectionStore(defaults: defaults)
         let backendStore = transcriptionBackendStore ?? TranscriptionBackendSelectionStore(defaults: defaults)
         let fluidStore = fluidAudioModelStore ?? FluidAudioASRModelSelectionStore(defaults: defaults)
-        self.modelManager = modelManager ?? DefaultModelManager(
+        let resolvedModelManager = modelManager ?? DefaultModelManager(
             selectionStore: store,
             transcriptionSelectionStore: transcriptionStore,
             transcriptionBackendStore: backendStore,
@@ -97,6 +91,10 @@ final class OnboardingViewModel: ObservableObject {
         self.transcriptionModelStore = transcriptionStore
         self.transcriptionBackendStore = backendStore
         self.fluidAudioModelStore = fluidStore
+        self.modelLifecycleController = ModelSetupLifecycleController(
+            modelManager: resolvedModelManager,
+            displayName: Self.displayName(for:)
+        )
         let selectedModel = store.selectedModel()
         self.selectedSummarizationModelID = selectedModel.id
         if store.selectedModelID() != selectedModel.id {
@@ -134,11 +132,14 @@ final class OnboardingViewModel: ObservableObject {
             .sink { [weak self] _ in
                 self?.handleDefaultsDidChange()
             }
-    }
 
-    deinit {
-        modelTask?.cancel()
-        modelsValidationTask?.cancel()
+        modelLifecycleController.$state
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                self?.modelsState = state
+                self?.updateCurrentStepIfNeeded()
+            }
+            .store(in: &cancellables)
     }
 
     var permissionsReady: Bool {
@@ -213,7 +214,7 @@ final class OnboardingViewModel: ObservableObject {
     func refreshAll() {
         refreshPermissions()
         refreshVaultStatus()
-        scheduleModelsValidation()
+        modelLifecycleController.refresh()
         updateCurrentStepIfNeeded()
     }
 
@@ -234,31 +235,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func startModelDownload() {
-        modelTask?.cancel()
-        modelsState = .downloading(progress: ModelDownloadProgress(fractionCompleted: 0, label: "Starting download"))
-
-        modelTask = Task { [weak self] in
-            guard let self else { return }
-
-            do {
-                let validation = try await modelManager.validateModels()
-                if !validation.invalidModelIDs.isEmpty {
-                    try await modelManager.removeModels(withIDs: validation.invalidModelIDs)
-                }
-
-                try await modelManager.ensureModelsPresent { [weak self] update in
-                    Task { @MainActor [weak self] in
-                        self?.modelsState = .downloading(progress: update)
-                    }
-                }
-
-                modelsState = .checking
-                await refreshModelsStatus()
-            } catch {
-                let message = ErrorHandler.userMessage(for: error, fallback: "Failed to download models.")
-                modelsState = .needsDownload(message: message)
-            }
-        }
+        modelLifecycleController.startDownload()
     }
 
     func advance() {
@@ -318,67 +295,7 @@ final class OnboardingViewModel: ObservableObject {
         updateCurrentStepIfNeeded()
     }
 
-    private func refreshModelsStatus() async {
-        if case .downloading = modelsState {
-            return
-        }
-
-        guard !Task.isCancelled else { return }
-
-        let wasReady: Bool
-        if case .ready = modelsState {
-            wasReady = true
-        } else {
-            wasReady = false
-        }
-
-        if !wasReady {
-            modelsState = .checking
-        }
-
-        do {
-            let result = try await modelManager.validateModels()
-            guard !Task.isCancelled else { return }
-            if result.isReady {
-                modelsState = .ready
-            } else {
-                modelsState = .needsDownload(message: modelMessage(from: result))
-            }
-        } catch {
-            guard !Task.isCancelled else { return }
-            let message = ErrorHandler.userMessage(for: error, fallback: "Failed to check model status.")
-            modelsState = .needsDownload(message: message)
-        }
-
-        updateCurrentStepIfNeeded()
-    }
-
-    private func scheduleModelsValidation() {
-        modelsValidationTask?.cancel()
-        modelsValidationTask = Task { [weak self] in
-            guard let self else { return }
-            await refreshModelsStatus()
-        }
-    }
-
-    private func modelMessage(from result: ModelValidationResult) -> String {
-        if result.missingModelIDs.isEmpty && result.invalidModelIDs.isEmpty {
-            return "Models ready."
-        }
-
-        var parts: [String] = []
-        if !result.missingModelIDs.isEmpty {
-            let names = result.missingModelIDs.map(displayName(for:))
-            parts.append("Missing: \(names.joined(separator: ", "))")
-        }
-        if !result.invalidModelIDs.isEmpty {
-            let names = result.invalidModelIDs.map(displayName(for:))
-            parts.append("Invalid: \(names.joined(separator: ", "))")
-        }
-        return parts.joined(separator: " ")
-    }
-
-    private func displayName(for id: String) -> String {
+    private static func displayName(for id: String) -> String {
         if let summarization = SummarizationModelCatalog.model(for: id) {
             return summarization.displayName
         }
@@ -387,6 +304,9 @@ final class OnboardingViewModel: ObservableObject {
         }
         if let fluidAudio = FluidAudioASRModelCatalog.model(for: id) {
             return fluidAudio.displayName
+        }
+        if id.hasSuffix("-ctc-vocab") {
+            return "FluidAudio CTC Vocabulary"
         }
         return id
     }
