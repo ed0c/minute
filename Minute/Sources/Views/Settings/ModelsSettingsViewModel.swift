@@ -53,12 +53,19 @@ final class ModelsSettingsViewModel: ObservableObject {
             persistVocabularySettings()
         }
     }
+    @Published var selectedTranscriptionLanguage: TranscriptionLanguage {
+        didSet {
+            guard oldValue != selectedTranscriptionLanguage else { return }
+            transcriptionLanguageStore.setSelectedLanguage(selectedTranscriptionLanguage)
+        }
+    }
 
     private let vocabularySettingsStore: any VocabularyBoostingSettingsStoring
     private let summarizationModelStore: SummarizationModelSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
+    private let transcriptionLanguageStore: TranscriptionLanguageSelectionStore
     private let modelLifecycleController: ModelSetupLifecycleController
     private var cancellables: Set<AnyCancellable> = []
     private var isRestoringVocabularySettings = false
@@ -70,12 +77,14 @@ final class ModelsSettingsViewModel: ObservableObject {
         transcriptionModelStore: TranscriptionModelSelectionStore = TranscriptionModelSelectionStore(),
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
         fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore(),
+        transcriptionLanguageStore: TranscriptionLanguageSelectionStore = TranscriptionLanguageSelectionStore(),
         vocabularySettingsStore: (any VocabularyBoostingSettingsStoring)? = nil
     ) {
         self.summarizationModelStore = summarizationModelStore
         self.transcriptionModelStore = transcriptionModelStore
         self.transcriptionBackendStore = transcriptionBackendStore
         self.fluidAudioModelStore = fluidAudioModelStore
+        self.transcriptionLanguageStore = transcriptionLanguageStore
         self.vocabularySettingsStore = vocabularySettingsStore ?? VocabularyBoostingSettingsStore()
         let resolvedModelManager = modelManager ?? DefaultModelManager(
             selectionStore: summarizationModelStore,
@@ -107,6 +116,7 @@ final class ModelsSettingsViewModel: ObservableObject {
         if fluidAudioModelStore.selectedModelID() != selectedFluidModel.id {
             fluidAudioModelStore.setSelectedModelID(selectedFluidModel.id)
         }
+        self.selectedTranscriptionLanguage = transcriptionLanguageStore.selectedLanguage()
         let vocabularySettings = self.vocabularySettingsStore.load()
         self.vocabularyBoostingEnabled = vocabularySettings.enabled
         self.vocabularyBoostingTermsInput = vocabularySettings.editorInput
@@ -152,6 +162,14 @@ final class ModelsSettingsViewModel: ObservableObject {
 
     var isFluidAudioSelected: Bool {
         TranscriptionBackend.backend(for: selectedTranscriptionBackendID) == .fluidAudio
+    }
+
+    var isWhisperSelected: Bool {
+        !isFluidAudioSelected
+    }
+
+    var transcriptionLanguages: [TranscriptionLanguage] {
+        TranscriptionLanguage.allCases
     }
 
     var selectedTranscriptionBackendDisplayName: String {

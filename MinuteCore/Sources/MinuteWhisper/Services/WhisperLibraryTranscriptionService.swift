@@ -5,26 +5,35 @@ import whisper
 
 public struct WhisperLibraryTranscriptionConfiguration: Sendable, Equatable {
     public var modelURL: URL
-
-    /// Set to true for multilingual models (recommended). When true, Whisper will auto-detect language.
-    public var detectLanguage: Bool
-
-    /// Language hint when `detectLanguage` is false.
-    public var language: String
-
     public var threads: Int
+
+    /// Optional language override. When set, bypasses the global language setting.
+    public var languageOverride: TranscriptionLanguage?
 
     public init(
         modelURL: URL,
-        /// Default to auto-detection for multilingual models.
-        detectLanguage: Bool = true,
-        language: String = "auto",
+        threads: Int = 4,
+        languageOverride: TranscriptionLanguage? = nil
+    ) {
+        self.modelURL = modelURL
+        self.threads = threads
+        self.languageOverride = languageOverride
+    }
+
+    /// Legacy initializer for XPC service compatibility.
+    public init(
+        modelURL: URL,
+        detectLanguage: Bool,
+        language: String,
         threads: Int = 4
     ) {
         self.modelURL = modelURL
-        self.detectLanguage = detectLanguage
-        self.language = language
         self.threads = threads
+        if detectLanguage {
+            self.languageOverride = .auto
+        } else {
+            self.languageOverride = TranscriptionLanguage(rawValue: language) ?? .english
+        }
     }
 }
 
@@ -33,22 +42,28 @@ public struct WhisperLibraryTranscriptionConfiguration: Sendable, Equatable {
 /// Uses the whisper.cpp C API (see `whisper.h`) directly from Swift.
 public struct WhisperLibraryTranscriptionService: TranscriptionServicing {
     private let configuration: WhisperLibraryTranscriptionConfiguration
+    private let languageStore: TranscriptionLanguageSelectionStore
     private let logger = Logger(subsystem: "roblibob.Minute", category: "whisper-lib")
 
     public init(configuration: WhisperLibraryTranscriptionConfiguration) {
         self.configuration = configuration
+        self.languageStore = TranscriptionLanguageSelectionStore()
+    }
+
+    public init(
+        configuration: WhisperLibraryTranscriptionConfiguration,
+        languageStore: TranscriptionLanguageSelectionStore
+    ) {
+        self.configuration = configuration
+        self.languageStore = languageStore
     }
 
     public static func liveDefault() -> WhisperLibraryTranscriptionService {
         let selectionStore = TranscriptionModelSelectionStore()
         let fallbackURL = selectionStore.selectedModel().destinationURL
-        // v1 default: multilingual model + auto language detection for mixed-language meetings.
         return WhisperLibraryTranscriptionService(
             configuration: WhisperLibraryTranscriptionConfiguration(
-                modelURL: WhisperModelPaths.resolvedModelURL(fallback: fallbackURL),
-                detectLanguage: true,
-                // Unused when `detectLanguage = true`, but keep "auto" for clearer logs.
-                language: "auto"
+                modelURL: WhisperModelPaths.resolvedModelURL(fallback: fallbackURL)
             )
         )
     }
@@ -199,9 +214,13 @@ public struct WhisperLibraryTranscriptionService: TranscriptionServicing {
                 return TranscriptionResult(text: normalized, segments: transcriptSegments)
             }
 
-            var result = try runWhisper(detectLanguage: true, language: nil)
+            let selectedLanguage = configuration.languageOverride ?? languageStore.selectedLanguage()
+            var result = try runWhisper(
+                detectLanguage: selectedLanguage.detectLanguage,
+                language: selectedLanguage.whisperLanguageCode
+            )
 
-            if result.text.isEmpty {
+            if result.text.isEmpty, selectedLanguage.detectLanguage {
                 result = try runWhisper(detectLanguage: false, language: "en")
             }
 
