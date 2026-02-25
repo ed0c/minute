@@ -117,16 +117,6 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         pendingDeleteTypeID != nil
     }
 
-    var selectedTypeStatusText: String {
-        guard let selected = selectedDefinition else { return "" }
-        switch selected.source {
-        case .custom:
-            return "Custom"
-        case .builtIn:
-            return isSelectedBuiltInOverridden ? "Built-in (Overridden)" : "Built-in (Default)"
-        }
-    }
-
     var hasUnsavedChanges: Bool {
         currentSnapshot() != baselineSnapshot
     }

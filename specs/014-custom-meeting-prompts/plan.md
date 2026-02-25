@@ -11,14 +11,14 @@ The plan introduces a structured prompt-component model (instead of only hardcod
 
 ## Technical Context
 
-**Language/Version**: Swift 5.9+ (Xcode 15.x), Swift tools 6.2 (`MinuteCore`)  
-**Primary Dependencies**: SwiftUI, Combine, MinuteCore pipeline/services, MinuteLlama summarization service, existing UserDefaults-backed settings stores  
-**Storage**: Local-only persistence via `UserDefaults` (+ optional local JSON snapshot for prompt library migrations if needed); existing vault outputs remain unchanged  
-**Testing**: Swift Testing in `MinuteCore/Tests/MinuteCoreTests` + app/UI integration tests in `MinuteTests` (where applicable)  
-**Target Platform**: Native macOS 14+ app  
-**Project Type**: Single macOS app target (`Minute`) with shared package modules (`MinuteCore`, `MinuteLlama`)  
-**Performance Goals**: Prompt resolution and meeting-type selection should feel immediate (<100 ms local resolution per interaction); classifier pass should remain bounded and keep existing summarization responsiveness expectations  
-**Constraints**: Local-only processing; no outbound network calls except model downloads; deterministic note output contract remains stable; long-running operations stay cancellable; no extra vault artifacts beyond existing 3-file contract  
+**Language/Version**: Swift 5.9+ (Xcode 15.x), Swift tools 6.2 (`MinuteCore`)
+**Primary Dependencies**: SwiftUI, Combine, MinuteCore pipeline/services, MinuteLlama summarization service, existing UserDefaults-backed settings stores
+**Storage**: Local-only persistence via `UserDefaults` (+ optional local JSON snapshot for prompt library migrations if needed); existing vault outputs remain unchanged
+**Testing**: Swift Testing in `MinuteCore/Tests/MinuteCoreTests` + app/UI integration tests in `MinuteTests` (where applicable)
+**Target Platform**: Native macOS 14+ app
+**Project Type**: Single macOS app target (`Minute`) with shared package modules (`MinuteCore`, `MinuteLlama`)
+**Performance Goals**: Prompt resolution and meeting-type selection should feel immediate (<100 ms local resolution per interaction); classifier pass should remain bounded and keep existing summarization responsiveness expectations
+**Constraints**: Local-only processing; no outbound network calls except model downloads; deterministic note output contract remains stable; long-running operations stay cancellable; no extra vault artifacts beyond existing 3-file contract
 **Scale/Scope**: Support built-in prompt overrides plus user-defined custom types (target: at least dozens of types without degrading settings usability), and preserve compatibility for existing meetings/preferences
 
 ## Constitution Check

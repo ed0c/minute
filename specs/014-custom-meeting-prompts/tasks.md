@@ -1,6 +1,6 @@
 # Tasks: Custom Meeting Type Prompts
 
-**Input**: Design documents from `/specs/014-custom-meeting-prompts/`  
+**Input**: Design documents from `/specs/014-custom-meeting-prompts/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/openapi.yaml, quickstart.md
 
 **Tests**: Tests are REQUIRED for this feature (new feature + MinuteCore behavior changes + contract-sensitive pipeline flow).

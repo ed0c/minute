@@ -1,8 +1,8 @@
 # Feature Specification: Custom Meeting Type Prompts
 
-**Feature Branch**: `014-custom-meeting-prompts`  
-**Created**: 2026-02-23  
-**Status**: Draft  
+**Feature Branch**: `014-custom-meeting-prompts`
+**Created**: 2026-02-23
+**Status**: Draft
 **Input**: User description: "As a user I want to create my own custom meeting types where I can customize the prompt. I also want the possibility to edit the default prompts."
 
 ## Clarifications
@@ -10,6 +10,12 @@
 ### Session 2026-02-23
 
 - Q: Where should users manage custom and default meeting prompts in Settings? → A: In a dedicated "Meeting Types" section (not mixed into general AI/model controls).
+
+### Session 2026-02-25
+
+- Q: Should advanced summary sections be configurable per meeting type? → A: Yes. Decision, action item, open question, and key point sections are independently toggleable per type.
+- Q: What happens when a summary section is disabled? → A: The disabled section is omitted from prompt output instructions and omitted from rendered meeting summary output.
+- Q: Are noise filtering and additional guidance also toggleable? → A: No. They remain always available text guidance fields.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -42,6 +48,7 @@ As a user, I want to edit prompts for built-in meeting types so default behavior
 1. **Given** a built-in meeting type, **When** the user updates and saves its prompt, **Then** future meetings using that type use the updated prompt.
 2. **Given** a built-in meeting type prompt has been edited, **When** the user restores the default prompt, **Then** future meetings use the original shipped prompt.
 3. **Given** a built-in meeting type prompt is edited, **When** the user views meeting type choices, **Then** built-in type identity and naming remain intact.
+4. **Given** a meeting type has advanced section toggles configured, **When** a user disables one or more summary sections, **Then** generated summaries omit those sections from structured output.
 
 ---
 
@@ -67,6 +74,8 @@ As a user, I want to manage custom meeting types safely over time so prompt chan
 - A user deletes a custom meeting type that is currently selected for an unprocessed meeting.
 - A user edits a default prompt after older meetings were already processed; historical meeting outputs should not change retroactively.
 - A user rapidly saves multiple prompt edits and expects the last confirmed save to be the one applied.
+- A user disables a summary section, then re-enables it later, and expects previously entered section guidance text to still be available.
+- A user has manual meeting type selection with no active recording and expects selection state to persist for the next process action.
 
 ## Requirements *(mandatory)*
 
@@ -88,6 +97,12 @@ As a user, I want to manage custom meeting types safely over time so prompt chan
 - **FR-014**: If a selected custom meeting type is no longer available at processing time, the system MUST prevent processing until the user selects a valid meeting type.
 - **FR-015**: The system MUST preserve all meeting type and prompt customizations across app restarts.
 - **FR-016**: The system MUST keep summary output compatible with the existing meeting note output contract.
+- **FR-017**: The system MUST allow users to independently enable or disable these advanced summary sections per meeting type: decisions, action items, open questions, and key points.
+- **FR-018**: When an advanced summary section is disabled, that section MUST be omitted from summarization output instructions for that meeting type.
+- **FR-019**: When an advanced summary section is disabled, that section MUST be omitted from the rendered meeting note summary output for meetings processed with that meeting type.
+- **FR-020**: Noise filtering guidance and additional guidance MUST remain available prompt fields and MUST NOT require section toggles.
+- **FR-021**: The autodetect option MUST NOT be editable as a meeting type definition.
+- **FR-022**: Meeting type selection for new sessions MUST present all available meeting types as directly selectable labels so users can choose without opening a dropdown.
 
 ### Non-Functional Requirements *(mandatory)*
 
@@ -125,3 +140,5 @@ As a user, I want to manage custom meeting types safely over time so prompt chan
 - **SC-003**: In acceptance testing, at least 90% of users can edit a built-in prompt and restore its default without assistance in under 90 seconds.
 - **SC-004**: In regression testing, 100% of built-in meeting types remain available and non-deletable while still allowing prompt edits and default restore.
 - **SC-005**: In regression testing, no critical defects are introduced in existing meeting processing for users who do not create custom meeting types.
+- **SC-006**: In acceptance testing, 100% of meetings processed with disabled advanced sections omit those sections from the final note output.
+- **SC-007**: In usability testing, at least 90% of users can identify and select a desired meeting type from the stage view in one interaction without opening additional controls.

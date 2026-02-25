@@ -1,7 +1,7 @@
 # Specification Quality Checklist: Custom Meeting Type Prompts
 
-**Purpose**: Validate specification completeness and quality before proceeding to planning  
-**Created**: 2026-02-23  
+**Purpose**: Validate specification completeness and quality before proceeding to planning
+**Created**: 2026-02-23
 **Feature**: [Link to spec.md](../spec.md)
 
 ## Content Quality

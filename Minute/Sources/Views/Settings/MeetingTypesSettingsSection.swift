@@ -61,8 +61,6 @@ struct MeetingTypesSettingsSection: View {
                 }
             }
 
-
-
             Section(model.isCreatingCustomType ? "New Meeting Type" : "Prompt Content") {
                 FieldBlock(
                     title: "Display Name",
