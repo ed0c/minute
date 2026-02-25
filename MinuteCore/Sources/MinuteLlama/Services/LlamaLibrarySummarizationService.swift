@@ -64,35 +64,54 @@ public struct LlamaLibrarySummarizationService: SummarizationServicing {
         languageProcessing: LanguageProcessingProfile,
         outputLanguage: OutputLanguage
     ) async throws -> String {
-        let strategy = PromptFactory.strategy(for: meetingType)
+        try await summarize(
+            transcript: transcript,
+            meetingDate: meetingDate,
+            meetingType: meetingType,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage,
+            resolvedPromptBundle: nil
+        )
+    }
+
+    public func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String {
         // Prepend date context to transcript for the model
         let datedTranscript = "Meeting Date: \(MinuteISODate.format(meetingDate))\n\n\(transcript)"
+        let systemPrompt: String
+        let userPrompt: String
 
-        let systemPrompt = PromptFactory.systemPrompt(
-            strategy: strategy,
-            languageProcessing: languageProcessing,
-            outputLanguage: outputLanguage
-        )
+        if let resolvedPromptBundle {
+            systemPrompt = resolvedPromptBundle.systemPrompt
+            userPrompt = PromptFactory.userPrompt(
+                transcript: datedTranscript,
+                preamble: resolvedPromptBundle.userPromptPreamble
+            )
+        } else {
+            let strategy = PromptFactory.strategy(for: meetingType)
+            systemPrompt = PromptFactory.systemPrompt(
+                strategy: strategy,
+                languageProcessing: languageProcessing,
+                outputLanguage: outputLanguage
+            )
+            let preamble = PromptFactory.userPromptPreamble(
+                strategy: strategy,
+                languageProcessing: languageProcessing,
+                outputLanguage: outputLanguage
+            )
+            userPrompt = PromptFactory.userPrompt(transcript: datedTranscript, preamble: preamble)
+        }
+
         logger.info(
             "Summarization system prompt [meetingType=\(meetingType.rawValue, privacy: .public), languageProcessing=\(languageProcessing.rawValue, privacy: .public), outputLanguage=\(outputLanguage.rawValue, privacy: .public)]: \(systemPrompt, privacy: .public)"
         )
-        let baseUserPrompt = strategy.userPrompt(for: datedTranscript)
-        let languageProcessingUserInstruction = languageProcessing
-            .summarizationUserInstruction
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let outputLanguageUserInstruction = outputLanguage
-            .summarizationUserInstruction
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let languageUserInstruction = [languageProcessingUserInstruction, outputLanguageUserInstruction]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        let userPrompt: String
-        if languageUserInstruction.isEmpty {
-            userPrompt = baseUserPrompt
-        } else {
-            userPrompt = languageUserInstruction + "\n\n" + baseUserPrompt
-        }
-        
+
         return try await runLlama(
             systemPrompt: systemPrompt,
             userPrompt: userPrompt
@@ -112,6 +131,32 @@ public struct LlamaLibrarySummarizationService: SummarizationServicing {
 
         let response = try await runLlama(systemPrompt: nil, userPrompt: prompt, configuration: classifyConfiguration)
         return MeetingTypeClassifier.parseResponse(response)
+    }
+
+    public func classify(
+        transcript: String,
+        candidates: [MeetingTypeClassifierCandidate],
+        fallbackTypeID: String
+    ) async throws -> String {
+        let prompt = MeetingTypeClassifier.prompt(
+            for: transcript,
+            candidates: candidates,
+            fallbackLabel: candidates.first(where: { $0.typeId == fallbackTypeID })?.label ?? "General"
+        )
+
+        var classifyConfiguration = configuration
+        classifyConfiguration.temperature = 0.0
+        classifyConfiguration.topP = nil
+        classifyConfiguration.topK = nil
+        classifyConfiguration.seed = nil
+        classifyConfiguration.maxTokens = 16
+
+        let response = try await runLlama(systemPrompt: nil, userPrompt: prompt, configuration: classifyConfiguration)
+        return MeetingTypeClassifier.parseResponse(
+            response,
+            candidates: candidates,
+            fallbackTypeID: fallbackTypeID
+        )
     }
 
     public func repairJSON(_ invalidJSON: String) async throws -> String {

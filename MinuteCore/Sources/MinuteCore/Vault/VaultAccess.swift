@@ -18,7 +18,7 @@ public struct VaultAccess {
         func resume(with result: Result<URL, Error>) {
             lock.lock()
             guard let continuation else {
-                lock.unlock()
+                lock.unlock()   
                 return
             }
             self.continuation = nil

@@ -80,9 +80,9 @@ struct RecordingSessionCardView: View {
     }
 
     var body: some View {
-        VStack() {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 30) {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
 
                         if isStopping {
@@ -120,41 +120,8 @@ struct RecordingSessionCardView: View {
                                 .transition(.opacity)
                         }
                     }
-                }
 
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Meeting Type")
-                            .minuteFootnote()
-                            .textCase(.uppercase)
-
-                        Menu {
-                            ForEach(MeetingType.allCases, id: \.self) { type in
-                                Button(type.displayName) {
-                                    model.meetingType = type
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "rectangle.grid.1x2")
-                                    .foregroundStyle(Color.minuteGlow)
-                                Text(model.meetingType.displayName)
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color.minuteTextPrimary)
-                                Spacer(minLength: 8)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.minuteTextSecondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .frame(maxWidth: .infinity)
-                        .minuteDropdownStyle()
-                        .accessibilityLabel(Text("Meeting Type"))
-                        .accessibilityValue(Text(model.meetingType.displayName))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer(minLength: 0)
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Language Processing")
@@ -176,16 +143,23 @@ struct RecordingSessionCardView: View {
                                     Text(model.selectedLanguageProcessingTitle)
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Color.minuteTextPrimary)
-                                    Spacer(minLength: 8)
                                     Image(systemName: "chevron.down")
                                         .font(.system(size: 12, weight: .semibold))
                                         .foregroundStyle(Color.minuteTextSecondary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .menuStyle(.borderlessButton)
-                            .frame(maxWidth: .infinity)
-                            .minuteDropdownStyle()
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.minuteSurface)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.minuteOutline, lineWidth: 1)
+                            )
+                            .fixedSize(horizontal: true, vertical: false)
                             .help(model.selectedLanguageProcessingDetailText)
                             .accessibilityLabel(Text("Language Processing"))
                             .accessibilityValue(Text(model.selectedLanguageProcessingTitle))
@@ -233,41 +207,76 @@ struct RecordingSessionCardView: View {
                                 .foregroundStyle(Color.orange)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
 
-                HStack(alignment: .top, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Meeting Type")
+                        .minuteFootnote()
+                        .textCase(.uppercase)
+
+                    MeetingTypeWrapLayout(horizontalSpacing: 8, verticalSpacing: 8) {
+                        ForEach(model.meetingTypeOptions, id: \.typeId) { definition in
+                            MeetingTypeChip(
+                                title: definition.displayName,
+                                symbolName: meetingTypeSymbolName(for: definition),
+                                symbolTint: meetingTypeSymbolTint(for: definition),
+                                isSelected: model.selectedMeetingTypeID == definition.typeId
+                            ) {
+                                model.selectedMeetingTypeID = definition.typeId
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text("Meeting Type"))
+                    .accessibilityValue(Text(model.selectedMeetingTypeDisplayName))
+
+                    Text(model.selectedMeetingTypeStatusText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.minuteTextSecondary)
+
+                    if let warning = model.selectedMeetingTypeWarningMessage {
+                        Text(warning)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.orange)
+                    }
+                }
+
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+                    GridRow {
                         Text("Audio Channels")
                             .minuteFootnote()
                             .textCase(.uppercase)
+                            .gridCellColumns(2)
 
-                        HStack(spacing: 14) {
-                            CaptureSourceCard(
-                                title: "Microphone",
-                                systemImage: "mic.fill",
-                                tint: Color.accentColor,
-                                isOn: microphoneBinding.wrappedValue,
-                                isEnabled: true,
-                                action: { microphoneBinding.wrappedValue.toggle() }
-                            )
-
-                            CaptureSourceCard(
-                                title: "System",
-                                systemImage: "speaker.wave.2.fill",
-                                tint: Color.pink,
-                                isOn: systemAudioBinding.wrappedValue,
-                                isEnabled: true,
-                                action: { systemAudioBinding.wrappedValue.toggle() }
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 10) {
                         Text("Screen Context")
                             .minuteFootnote()
                             .textCase(.uppercase)
+
+                        Text("File Processing")
+                            .minuteFootnote()
+                            .textCase(.uppercase)
+                    }
+
+                    GridRow {
+                        CaptureSourceCard(
+                            title: "Microphone",
+                            systemImage: "mic.fill",
+                            tint: Color.accentColor,
+                            isOn: microphoneBinding.wrappedValue,
+                            isEnabled: true,
+                            action: { microphoneBinding.wrappedValue.toggle() }
+                        )
+
+                        CaptureSourceCard(
+                            title: "System",
+                            systemImage: "speaker.wave.2.fill",
+                            tint: Color.pink,
+                            isOn: systemAudioBinding.wrappedValue,
+                            isEnabled: true,
+                            action: { systemAudioBinding.wrappedValue.toggle() }
+                        )
 
                         CaptureSourceCard(
                             title: "Screen Record",
@@ -295,17 +304,32 @@ struct RecordingSessionCardView: View {
                             )
                         }
 
+                        FileProcessingCard(
+                            isHighlighted: isDropTargeted,
+                            isEnabled: model.state.canImportMedia,
+                            action: onUploadTap
+                        )
+                    }
+
+                    GridRow {
+                        Text("")
+                        Text("")
+
                         Text(model.screenCaptureSelectionDisplayText ?? "None")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color.minuteTextSecondary)
                             .lineLimit(1)
                             .accessibilityLabel(Text("Selected window"))
                             .accessibilityValue(Text(model.screenCaptureSelectionDisplayText ?? "None"))
+
+                        Text("")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity)
 
             }
+            .padding(.horizontal, 22)
+            .padding(.top, topInset)
 
             Group {
                 if case .recording(let session) = model.state {
@@ -313,11 +337,6 @@ struct RecordingSessionCardView: View {
                         session: session,
                         levels: model.audioLevelSamples,
                         isListening: isListening
-                    )
-                } else if model.state.canImportMedia {
-                    SessionDropZoneView(
-                        isHighlighted: isDropTargeted,
-                        onUploadTap: onUploadTap
                     )
                 } else {
                     VStack(spacing: 10) {
@@ -335,12 +354,154 @@ struct RecordingSessionCardView: View {
             .frame(height: 220)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .padding(.horizontal, 22)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, topInset)
         .padding(.bottom, 22 + bottomInset)
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func meetingTypeSymbolName(for definition: MeetingTypeDefinition) -> String {
+        guard definition.source == .builtIn else {
+            return "sparkles"
+        }
+
+        guard let builtInType = MeetingType(rawValue: definition.typeId) else {
+            return "shippingbox.fill"
+        }
+
+        switch builtInType {
+        case .autodetect:
+            return "wand.and.stars"
+        case .general:
+            return "person.3.fill"
+        case .standup:
+            return "figure.walk.motion"
+        case .designReview:
+            return "paintpalette.fill"
+        case .oneOnOne:
+            return "person.2.fill"
+        case .presentation:
+            return "rectangle.on.rectangle.angled"
+        case .planning:
+            return "calendar.badge.clock"
+        }
+    }
+
+    private func meetingTypeSymbolTint(for definition: MeetingTypeDefinition) -> Color {
+        if definition.source == .custom {
+            return .blue
+        }
+        return .minuteGlow
+    }
+}
+
+private struct MeetingTypeChip: View {
+    let title: String
+    let symbolName: String
+    let symbolTint: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(symbolTint)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.minuteGlow.opacity(0.20) : Color.minuteSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.minuteGlow.opacity(0.75) : Color.minuteOutline, lineWidth: isSelected ? 1.5 : 1)
+            )
+            .foregroundStyle(isSelected ? Color.minuteTextPrimary : Color.minuteTextSecondary)
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct MeetingTypeWrapLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) -> CGSize {
+        let maxRowWidth = proposal.width ?? .infinity
+        var currentRowWidth: CGFloat = 0
+        var currentRowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var widestRow: CGFloat = 0
+
+        for subview in subviews {
+            let idealSize = subview.sizeThatFits(.unspecified)
+            let itemWidth = min(idealSize.width, maxRowWidth)
+
+            if currentRowWidth > 0 && currentRowWidth + itemWidth > maxRowWidth {
+                widestRow = max(widestRow, currentRowWidth - horizontalSpacing)
+                totalHeight += currentRowHeight + verticalSpacing
+                currentRowWidth = 0
+                currentRowHeight = 0
+            }
+
+            currentRowWidth += itemWidth + horizontalSpacing
+            currentRowHeight = max(currentRowHeight, idealSize.height)
+        }
+
+        if !subviews.isEmpty {
+            widestRow = max(widestRow, max(0, currentRowWidth - horizontalSpacing))
+            totalHeight += currentRowHeight
+        }
+
+        return CGSize(
+            width: proposal.width ?? widestRow,
+            height: totalHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) {
+        var cursorX = bounds.minX
+        var cursorY = bounds.minY
+        var currentRowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let idealSize = subview.sizeThatFits(.unspecified)
+            let availableWidth = bounds.width
+            let itemWidth = min(idealSize.width, availableWidth)
+
+            if cursorX > bounds.minX && cursorX + itemWidth > bounds.maxX {
+                cursorX = bounds.minX
+                cursorY += currentRowHeight + verticalSpacing
+                currentRowHeight = 0
+            }
+
+            subview.place(
+                at: CGPoint(x: cursorX, y: cursorY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: itemWidth, height: idealSize.height)
+            )
+
+            cursorX += itemWidth + horizontalSpacing
+            currentRowHeight = max(currentRowHeight, idealSize.height)
+        }
     }
 }
 
@@ -366,45 +527,6 @@ struct RecordingSessionView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-struct SessionDropZoneView: View {
-    let isHighlighted: Bool
-    let onUploadTap: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "tray.and.arrow.down.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(isHighlighted ? Color.minuteGlow : Color.minuteTextSecondary)
-
-            VStack(spacing: 4) {
-                Text("Drop audio or video")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.minuteTextPrimary)
-
-                Text("Or upload a file to start processing")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.minuteTextSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(
-                    isHighlighted ? Color.minuteGlow.opacity(0.8) : Color.minuteOutline,
-                    style: StrokeStyle(lineWidth: isHighlighted ? 2 : 1, dash: [8, 6])
-                )
-        )
-        .animation(.easeInOut(duration: 0.15), value: isHighlighted)
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .onTapGesture {
-            onUploadTap()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Upload recording"))
-        .accessibilityHint(Text("Click to browse for a file, or drag and drop a recording."))
     }
 }
 
@@ -449,6 +571,50 @@ private struct CaptureSourceCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+    }
+}
+
+private struct FileProcessingCard: View {
+    let isHighlighted: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.minuteSurfaceStrong)
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(isEnabled ? Color.minuteGlow : Color.minuteTextMuted)
+                }
+                .frame(width: 46, height: 46)
+
+                Text("Upload File")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isEnabled ? Color.minuteTextSecondary : Color.minuteTextMuted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isEnabled ? (isHighlighted ? Color.minuteSurfaceStrong : Color.minuteSurface) : Color.minuteSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        isEnabled ? (isHighlighted ? Color.minuteGlow.opacity(0.55) : Color.minuteOutline) : Color.minuteOutline,
+                        lineWidth: isHighlighted ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .animation(.easeInOut(duration: 0.15), value: isHighlighted)
+        .accessibilityLabel(Text("Upload recording file"))
+        .accessibilityHint(Text("Browse for audio or video to process."))
     }
 }
 

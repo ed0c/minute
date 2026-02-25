@@ -17,19 +17,19 @@ public enum PromptFactory {
             // Autodetect should typically be resolved to a specific type before calling this factory.
             // If it remains .autodetect, we fallback to the General strategy.
             return GeneralPromptStrategy()
-            
+
         case .standup:
             return StandupPromptStrategy()
-            
+
         case .presentation:
             return PresentationPromptStrategy()
-            
+
         case .oneOnOne:
             return OneOnOnePromptStrategy()
-            
+
         case .planning:
             return PlanningPromptStrategy()
-            
+
         case .designReview:
             return DesignReviewPromptStrategy()
         }
@@ -41,6 +41,119 @@ public enum PromptFactory {
         outputLanguage: OutputLanguage = .defaultSelection
     ) -> String {
         let base = strategy.systemPrompt().trimmingCharacters(in: .whitespacesAndNewlines)
+        return appendRuntimeLanguageInstructions(
+            base: base,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    public static func systemPrompt(
+        promptComponents: PromptComponentSet,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage = .defaultSelection
+    ) -> String {
+        let components = promptComponents
+        let sections = [
+            """
+            You are an expert automated meeting secretary. Analyze a chronological meeting timeline and generate one structured JSON summary.
+
+            ### MEETING OBJECTIVE
+            \(components.objective)
+            """,
+            """
+            ### SUMMARY FOCUS
+            \(components.summaryFocus)
+            """,
+            optionalSection(title: "DECISION RULES", body: components.decisionRules),
+            optionalSection(title: "ACTION ITEM RULES", body: components.actionItemRules),
+            optionalSection(title: "OPEN QUESTION RULES", body: components.openQuestionRules),
+            optionalSection(title: "KEY POINT RULES", body: components.keyPointRules),
+            optionalSection(title: "NOISE FILTER RULES", body: components.noiseFilterRules),
+            optionalSection(title: "ADDITIONAL GUIDANCE", body: components.additionalGuidance),
+            """
+            ### OUTPUT FORMAT
+            Return one valid JSON object with exactly these fields:
+            - title (string)
+            - date (YYYY-MM-DD)
+            - summary (string)
+            - decisions (array of string)
+            - action_items (array of objects with owner and task)
+            - open_questions (array of string)
+            - key_points (array of string)
+
+            ### CRITICAL RULES
+            - Use only information present in the timeline.
+            - If a section has no evidence, return an empty array for that field.
+            - Do not output markdown fences or extra prose outside JSON.
+            """
+        ]
+
+        let base = sections
+            .compactMap { $0 }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        return appendRuntimeLanguageInstructions(
+            base: base,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    public static func userPromptPreamble(
+        strategy: PromptStrategy,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage = .defaultSelection
+    ) -> String {
+        let base = strategy.userPrompt(for: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return applyRuntimeUserInstructions(
+            basePreamble: base.isEmpty ? "Timeline follows:" : base,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    public static func userPromptPreamble(
+        promptComponents: PromptComponentSet,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage = .defaultSelection
+    ) -> String {
+        let guidance = promptComponents.additionalGuidance.trimmingCharacters(in: .whitespacesAndNewlines)
+        let basePreamble: String
+        if guidance.isEmpty {
+            basePreamble = "Timeline follows:"
+        } else {
+            basePreamble = "Additional guidance: \(guidance)\n\nTimeline follows:"
+        }
+        return applyRuntimeUserInstructions(
+            basePreamble: basePreamble,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    public static func userPrompt(
+        transcript: String,
+        preamble: String
+    ) -> String {
+        let trimmedPreamble = preamble.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPreamble.isEmpty {
+            return trimmedTranscript
+        }
+        if trimmedTranscript.isEmpty {
+            return trimmedPreamble
+        }
+        return trimmedPreamble + "\n" + trimmedTranscript
+    }
+
+    private static func appendRuntimeLanguageInstructions(
+        base: String,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) -> String {
         let languageProcessingInstruction = languageProcessing
             .summarizationSystemInstruction
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,5 +167,36 @@ public enum PromptFactory {
         guard !instructions.isEmpty else { return base }
 
         return base + "\n\n" + instructions + "\n"
+    }
+
+    private static func applyRuntimeUserInstructions(
+        basePreamble: String,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) -> String {
+        let languageProcessingUserInstruction = languageProcessing
+            .summarizationUserInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputLanguageUserInstruction = outputLanguage
+            .summarizationUserInstruction
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let runtimeInstructions = [languageProcessingUserInstruction, outputLanguageUserInstruction]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if runtimeInstructions.isEmpty {
+            return basePreamble
+        }
+        return runtimeInstructions + "\n\n" + basePreamble
+    }
+
+    private static func optionalSection(title: String, body: String) -> String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return """
+        ### \(title)
+        \(trimmed)
+        """
     }
 }

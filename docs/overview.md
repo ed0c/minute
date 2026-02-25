@@ -9,7 +9,7 @@ What the app does
 - Record microphone + system audio locally.
 - Transcribe audio locally (Fluidaudio).
 - Optionally capture screen context locally for summaries.
-- **Tailor summaries based on meeting type (Standup, Presentation, etc.).**
+- **Tailor summaries based on meeting type (built-in and custom).**
 - Summarize locally with a JSON-only LLM prompt (llama).
 - Render a deterministic Markdown note from JSON.
 - Write exactly three files to the vault per meeting.
@@ -81,6 +81,13 @@ Code structure
 - Vendor/ (bundled binaries like ffmpeg)
 - scripts/ (release, notarization, appcast tooling)
 - docs/ (product and release docs)
+
+Meeting Types settings
+- Users manage prompts in **Settings -> Meeting Types**.
+- Built-in meeting types can be edited and restored to defaults.
+- Users can create, rename, and delete custom meeting types.
+- Custom meeting types can optionally participate in autodetect classification using classifier labels/signals.
+- If a previously selected custom type is removed, processing is blocked until a valid replacement is selected.
 
 Architecture
 UI stays thin; business logic lives in MinuteCore. The pipeline is a single

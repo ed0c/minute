@@ -98,6 +98,8 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var sessionVocabularyWarningMessage: String? = nil
     @Published private(set) var vocabularyBoostingEnabledInSettings: Bool = false
     @Published private(set) var globalVocabularyTerms: [String] = []
+    @Published private(set) var meetingTypeOptions: [MeetingTypeDefinition] = MeetingTypeLibrary.default.activeDefinitions
+    @Published var selectedMeetingTypeID: String = AppConfiguration.Defaults.defaultStageMeetingTypeID
     @Published var meetingType: MeetingType = .autodetect
     @Published var languageProcessing: LanguageProcessingProfile = .autoToEnglish
     @Published var outputLanguage: OutputLanguage = .defaultSelection
@@ -117,6 +119,48 @@ final class MeetingPipelineViewModel: ObservableObject {
         case .autoPreserve:
             return autoToPickedLanguageOptionTitle
         }
+    }
+
+    var selectedMeetingTypeDisplayName: String {
+        meetingTypeOptions.first(where: { $0.typeId == selectedMeetingTypeID })?.displayName
+            ?? "Unavailable (select meeting type)"
+    }
+
+    var selectedMeetingTypeStatusText: String {
+        guard let definition = meetingTypeOptions.first(where: { $0.typeId == selectedMeetingTypeID }) else {
+            return "Unavailable"
+        }
+        switch definition.source {
+        case .custom:
+            return "Custom"
+        case .builtIn:
+            if MeetingTypeLibrary.default.definition(for: definition.typeId)?.promptComponents != definition.promptComponents {
+                return "Built-in (Overridden)"
+            }
+            return "Built-in (Default)"
+        }
+    }
+
+    var selectedMeetingTypeWarningMessage: String? {
+        guard !isSelectedMeetingTypeAvailable else { return nil }
+        return "Selected meeting type is no longer available. Choose another type before processing."
+    }
+
+    var isSelectedMeetingTypeAvailable: Bool {
+        meetingTypeOptions.contains(where: { $0.typeId == selectedMeetingTypeID })
+    }
+
+    func meetingTypeMenuLabel(for definition: MeetingTypeDefinition) -> String {
+        let suffix: String
+        switch definition.source {
+        case .custom:
+            suffix = "Custom"
+        case .builtIn:
+            let isOverridden = MeetingTypeLibrary.default.definition(for: definition.typeId)?.promptComponents != definition.promptComponents
+            suffix = isOverridden ? "Edited" : ""
+        }
+        guard !suffix.isEmpty else { return definition.displayName }
+        return "\(definition.displayName) (\(suffix))"
     }
 
     var selectedLanguageProcessingDetailText: String {
@@ -174,6 +218,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private let silenceDetectionPolicy: SilenceDetectionPolicy
     private let recordingAlertNotifier: any RecordingAlertNotifying
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
+    private let meetingTypeLibraryStore: MeetingTypeLibraryStore
     private let vocabularySettingsStore: any VocabularyBoostingSettingsStoring
     private let sessionVocabularyResolver: any SessionVocabularyResolving
     private let modelValidationProvider: @Sendable () async throws -> ModelValidationResult
@@ -191,7 +236,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private var isPreparingPipelineContext = false
     private var lastAudioLevelUpdate: CFTimeInterval = 0
     private var screenContextEvents: [ScreenContextEvent] = []
-    private var screenCaptureSelection: ScreenContextWindowSelection?
+    @Published private var screenCaptureSelection: ScreenContextWindowSelection?
     private var screenCaptureBaseProcessedCount = 0
     private var screenCaptureBaseSkippedCount = 0
 
@@ -218,6 +263,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         silenceDetectionPolicy: SilenceDetectionPolicy = .default,
         recordingAlertNotifier: (any RecordingAlertNotifying)? = nil,
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
+        meetingTypeLibraryStore: MeetingTypeLibraryStore = MeetingTypeLibraryStore(),
         vocabularySettingsStore: (any VocabularyBoostingSettingsStoring) = VocabularyBoostingSettingsStore(),
         sessionVocabularyResolver: (any SessionVocabularyResolving) = SessionVocabularyResolver(),
         modelValidationProvider: (@Sendable () async throws -> ModelValidationResult)? = nil,
@@ -238,6 +284,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         self.silenceDetectionPolicy = silenceDetectionPolicy
         self.recordingAlertNotifier = recordingAlertNotifier ?? RecordingAlertNotificationCoordinator()
         self.transcriptionBackendStore = transcriptionBackendStore
+        self.meetingTypeLibraryStore = meetingTypeLibraryStore
         self.vocabularySettingsStore = vocabularySettingsStore
         self.sessionVocabularyResolver = sessionVocabularyResolver
         self.modelValidationProvider = modelValidationProvider ?? { ModelValidationResult(missingModelIDs: [], invalidModelIDs: []) }
@@ -245,6 +292,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         self.defaults = defaults
         self.screenCaptureEnabled = screenContextSettingsStore.isEnabled
 
+        refreshMeetingTypeOptions()
         loadStagePreferences()
 
         refreshVaultStatus()
@@ -274,8 +322,13 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     private func loadStagePreferences() {
+        refreshMeetingTypeOptions()
         let preferences = stagePreferencesStore.load()
-        meetingType = preferences.meetingType
+        let savedTypeID = preferences.meetingTypeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedMeetingTypeID = savedTypeID.isEmpty
+            ? AppConfiguration.Defaults.defaultStageMeetingTypeID
+            : savedTypeID
+        meetingType = MeetingType(rawValue: selectedMeetingTypeID) ?? .general
         languageProcessing = preferences.languageProcessing
         microphoneCaptureEnabled = preferences.microphoneEnabled
         systemAudioCaptureEnabled = preferences.systemAudioEnabled
@@ -288,7 +341,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     private func saveStagePreferences() {
         stagePreferencesStore.save(
             StagePreferences(
-                meetingType: meetingType,
+                meetingTypeID: selectedMeetingTypeID,
                 languageProcessing: languageProcessing,
                 microphoneEnabled: microphoneCaptureEnabled,
                 systemAudioEnabled: systemAudioCaptureEnabled
@@ -296,13 +349,34 @@ final class MeetingPipelineViewModel: ObservableObject {
         )
     }
 
+    private func refreshMeetingTypeOptions() {
+        let loadedLibrary = meetingTypeLibraryStore.load()
+        meetingTypeOptions = loadedLibrary.activeDefinitions
+        if selectedMeetingTypeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedMeetingTypeID = loadedLibrary.defaultTypeId
+        }
+    }
+
     private func startStagePreferencesObservation() {
+        $selectedMeetingTypeID
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.meetingType = MeetingType(rawValue: self.selectedMeetingTypeID) ?? .general
+                self.saveStagePreferences()
+            }
+            .store(in: &cancellables)
+
         $meetingType
             .map(\.rawValue)
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.saveStagePreferences()
+            .sink { [weak self] meetingTypeRaw in
+                guard let self else { return }
+                if self.selectedMeetingTypeID != meetingTypeRaw {
+                    self.selectedMeetingTypeID = meetingTypeRaw
+                }
             }
             .store(in: &cancellables)
 
@@ -860,15 +934,13 @@ final class MeetingPipelineViewModel: ObservableObject {
                 await clearActiveRecordingWarnings()
                 silenceStatus = SilenceStatusSnapshot()
 
-                guard let context = await makePipelineContext(
+                let context = try await makePipelineContext(
                     audioTempURL: result.wavURL,
                     audioDurationSeconds: result.duration,
                     startedAt: session.startedAt,
                     stoppedAt: stoppedAt,
                     screenContextEvents: screenContextEvents
-                ) else {
-                    throw MinuteError.vaultUnavailable
-                }
+                )
 
                 let accepted = await processingOrchestrator.enqueue(meetingID: session.id, context: context)
 
@@ -997,14 +1069,20 @@ final class MeetingPipelineViewModel: ObservableObject {
             defer { self.isPreparingPipelineContext = false }
 
             // Snapshot vault configuration.
-            guard let context = await makePipelineContext(
-                audioTempURL: audioTempURL,
-                audioDurationSeconds: durationSeconds,
-                startedAt: startedAt,
-                stoppedAt: stoppedAt,
-                screenContextEvents: screenContextEvents
-            ) else {
-                state = .failed(error: .vaultUnavailable, debugOutput: nil)
+            let context: PipelineContext
+            do {
+                context = try await makePipelineContext(
+                    audioTempURL: audioTempURL,
+                    audioDurationSeconds: durationSeconds,
+                    startedAt: startedAt,
+                    stoppedAt: stoppedAt,
+                    screenContextEvents: screenContextEvents
+                )
+            } catch let minuteError as MinuteError {
+                state = .failed(error: minuteError, debugOutput: minuteError.debugSummary)
+                return
+            } catch {
+                state = .failed(error: .vaultUnavailable, debugOutput: ErrorHandler.debugMessage(for: error))
                 return
             }
 
@@ -1048,6 +1126,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         activeSilenceAlert = nil
         activeScreenContextAlert = nil
         silenceStatus = SilenceStatusSnapshot()
+        selectedMeetingTypeID = AppConfiguration.Defaults.defaultStageMeetingTypeID
         meetingType = .autodetect
         resetSessionVocabularyOverride()
         Task { @MainActor [recordingAlertNotifier] in
@@ -1464,14 +1543,15 @@ final class MeetingPipelineViewModel: ObservableObject {
         startedAt: Date,
         stoppedAt: Date,
         screenContextEvents: [ScreenContextEvent]
-    ) async -> PipelineContext? {
+    ) async throws -> PipelineContext {
+        refreshMeetingTypeOptions()
         let configuration = AppConfiguration()
 
         // Validate vault selection.
         do {
             _ = try await vaultAccess.resolveVaultRootURL(timeout: .seconds(2))
         } catch {
-            return nil
+            throw MinuteError.vaultUnavailable
         }
 
         let workingDirectoryURL = FileManager.default.temporaryDirectory
@@ -1498,6 +1578,16 @@ final class MeetingPipelineViewModel: ObservableObject {
             sessionVocabularyWarningMessage = vocabularyResolution.warningMessage
         }
 
+        let availableTypeIDs = Set(meetingTypeOptions.map(\.typeId))
+        let resolvedTypeID = selectedMeetingTypeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard availableTypeIDs.contains(resolvedTypeID) else {
+            throw MinuteError.invalidMeetingTypeSelection
+        }
+        let selectionMode: MeetingTypeSelectionMode = resolvedTypeID == MeetingType.autodetect.rawValue
+            ? .autodetect
+            : .manual
+        let fallbackMeetingType = MeetingType(rawValue: resolvedTypeID) ?? .general
+
         return PipelineContext(
             vaultFolders: MeetingFileContract.VaultFolders(
                 meetingsRoot: configuration.meetingsRelativePath,
@@ -1515,7 +1605,11 @@ final class MeetingPipelineViewModel: ObservableObject {
             screenContextEvents: screenContextEvents,
             transcriptionOverride: nil,
             transcriptionVocabulary: vocabularyResolution.transcriptionVocabulary,
-            meetingType: meetingType,
+            meetingTypeSelection: MeetingTypeSelection(
+                selectionMode: selectionMode,
+                selectedTypeId: resolvedTypeID
+            ),
+            meetingType: fallbackMeetingType,
             languageProcessing: languageProcessing,
             outputLanguage: effectiveOutputLanguage,
             knownSpeakerSuggestionsEnabled: configuration.knownSpeakerSuggestionsEnabled
