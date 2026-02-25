@@ -65,28 +65,29 @@ public enum PromptFactory {
             ### SUMMARY FOCUS
             \(components.summaryFocus)
             """,
-            optionalSection(title: "DECISION RULES", body: components.decisionRules),
-            optionalSection(title: "ACTION ITEM RULES", body: components.actionItemRules),
-            optionalSection(title: "OPEN QUESTION RULES", body: components.openQuestionRules),
-            optionalSection(title: "KEY POINT RULES", body: components.keyPointRules),
+            optionalSection(
+                title: "DECISION RULES",
+                body: components.decisionRules,
+                enabled: components.decisionRulesEnabled
+            ),
+            optionalSection(
+                title: "ACTION ITEM RULES",
+                body: components.actionItemRules,
+                enabled: components.actionItemRulesEnabled
+            ),
+            optionalSection(
+                title: "OPEN QUESTION RULES",
+                body: components.openQuestionRules,
+                enabled: components.openQuestionRulesEnabled
+            ),
+            optionalSection(
+                title: "KEY POINT RULES",
+                body: components.keyPointRules,
+                enabled: components.keyPointRulesEnabled
+            ),
             optionalSection(title: "NOISE FILTER RULES", body: components.noiseFilterRules),
             optionalSection(title: "ADDITIONAL GUIDANCE", body: components.additionalGuidance),
-            """
-            ### OUTPUT FORMAT
-            Return one valid JSON object with exactly these fields:
-            - title (string)
-            - date (YYYY-MM-DD)
-            - summary (string)
-            - decisions (array of string)
-            - action_items (array of objects with owner and task)
-            - open_questions (array of string)
-            - key_points (array of string)
-
-            ### CRITICAL RULES
-            - Use only information present in the timeline.
-            - If a section has no evidence, return an empty array for that field.
-            - Do not output markdown fences or extra prose outside JSON.
-            """
+            outputFormatSection(for: components)
         ]
 
         let base = sections
@@ -191,7 +192,40 @@ public enum PromptFactory {
         return runtimeInstructions + "\n\n" + basePreamble
     }
 
-    private static func optionalSection(title: String, body: String) -> String? {
+    private static func outputFormatSection(for components: PromptComponentSet) -> String {
+        var fields: [String] = [
+            "- title (string)",
+            "- date (YYYY-MM-DD)",
+            "- summary (string)",
+        ]
+
+        if components.decisionRulesEnabled {
+            fields.append("- decisions (array of string)")
+        }
+        if components.actionItemRulesEnabled {
+            fields.append("- action_items (array of objects with owner and task)")
+        }
+        if components.openQuestionRulesEnabled {
+            fields.append("- open_questions (array of string)")
+        }
+        if components.keyPointRulesEnabled {
+            fields.append("- key_points (array of string)")
+        }
+
+        return """
+        ### OUTPUT FORMAT
+        Return one valid JSON object with exactly these fields:
+        \(fields.joined(separator: "\n"))
+
+        ### CRITICAL RULES
+        - Use only information present in the timeline.
+        - For every enabled array field above, return an empty array when evidence is missing.
+        - Do not output markdown fences or extra prose outside JSON.
+        """
+    }
+
+    private static func optionalSection(title: String, body: String, enabled: Bool = true) -> String? {
+        guard enabled else { return nil }
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return """

@@ -8,9 +8,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         var displayName: String
         var objective: String
         var summaryFocus: String
+        var decisionRulesEnabled: Bool
         var decisionRules: String
+        var actionItemRulesEnabled: Bool
         var actionItemRules: String
+        var openQuestionRulesEnabled: Bool
         var openQuestionRules: String
+        var keyPointRulesEnabled: Bool
         var keyPointRules: String
         var noiseFilterRules: String
         var additionalGuidance: String
@@ -27,9 +31,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
     @Published var draftDisplayName: String = ""
     @Published var draftObjective: String = ""
     @Published var draftSummaryFocus: String = ""
+    @Published var draftDecisionRulesEnabled: Bool = true
     @Published var draftDecisionRules: String = ""
+    @Published var draftActionItemRulesEnabled: Bool = true
     @Published var draftActionItemRules: String = ""
+    @Published var draftOpenQuestionRulesEnabled: Bool = true
     @Published var draftOpenQuestionRules: String = ""
+    @Published var draftKeyPointRulesEnabled: Bool = true
     @Published var draftKeyPointRules: String = ""
     @Published var draftNoiseFilterRules: String = ""
     @Published var draftAdditionalGuidance: String = ""
@@ -48,9 +56,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         displayName: "",
         objective: "",
         summaryFocus: "",
+        decisionRulesEnabled: true,
         decisionRules: "",
+        actionItemRulesEnabled: true,
         actionItemRules: "",
+        openQuestionRulesEnabled: true,
         openQuestionRules: "",
+        keyPointRulesEnabled: true,
         keyPointRules: "",
         noiseFilterRules: "",
         additionalGuidance: "",
@@ -186,9 +198,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         draftDisplayName = ""
         draftObjective = ""
         draftSummaryFocus = ""
+        draftDecisionRulesEnabled = true
         draftDecisionRules = ""
+        draftActionItemRulesEnabled = true
         draftActionItemRules = ""
+        draftOpenQuestionRulesEnabled = true
         draftOpenQuestionRules = ""
+        draftKeyPointRulesEnabled = true
         draftKeyPointRules = ""
         draftNoiseFilterRules = ""
         draftAdditionalGuidance = ""
@@ -359,9 +375,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
             draftDisplayName = ""
             draftObjective = ""
             draftSummaryFocus = ""
+            draftDecisionRulesEnabled = true
             draftDecisionRules = ""
+            draftActionItemRulesEnabled = true
             draftActionItemRules = ""
+            draftOpenQuestionRulesEnabled = true
             draftOpenQuestionRules = ""
+            draftKeyPointRulesEnabled = true
             draftKeyPointRules = ""
             draftNoiseFilterRules = ""
             draftAdditionalGuidance = ""
@@ -378,9 +398,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         draftDisplayName = selected.displayName
         draftObjective = selected.promptComponents.objective
         draftSummaryFocus = selected.promptComponents.summaryFocus
+        draftDecisionRulesEnabled = selected.promptComponents.decisionRulesEnabled
         draftDecisionRules = selected.promptComponents.decisionRules
+        draftActionItemRulesEnabled = selected.promptComponents.actionItemRulesEnabled
         draftActionItemRules = selected.promptComponents.actionItemRules
+        draftOpenQuestionRulesEnabled = selected.promptComponents.openQuestionRulesEnabled
         draftOpenQuestionRules = selected.promptComponents.openQuestionRules
+        draftKeyPointRulesEnabled = selected.promptComponents.keyPointRulesEnabled
         draftKeyPointRules = selected.promptComponents.keyPointRules
         draftNoiseFilterRules = selected.promptComponents.noiseFilterRules
         draftAdditionalGuidance = selected.promptComponents.additionalGuidance
@@ -397,9 +421,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
         PromptComponentSet(
             objective: draftObjective,
             summaryFocus: draftSummaryFocus,
+            decisionRulesEnabled: draftDecisionRulesEnabled,
             decisionRules: draftDecisionRules,
+            actionItemRulesEnabled: draftActionItemRulesEnabled,
             actionItemRules: draftActionItemRules,
+            openQuestionRulesEnabled: draftOpenQuestionRulesEnabled,
             openQuestionRules: draftOpenQuestionRules,
+            keyPointRulesEnabled: draftKeyPointRulesEnabled,
             keyPointRules: draftKeyPointRules,
             noiseFilterRules: draftNoiseFilterRules,
             additionalGuidance: draftAdditionalGuidance
@@ -422,9 +450,13 @@ final class MeetingTypesSettingsViewModel: ObservableObject {
             displayName: draftDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
             objective: draftObjective.trimmingCharacters(in: .whitespacesAndNewlines),
             summaryFocus: draftSummaryFocus.trimmingCharacters(in: .whitespacesAndNewlines),
+            decisionRulesEnabled: draftDecisionRulesEnabled,
             decisionRules: draftDecisionRules.trimmingCharacters(in: .whitespacesAndNewlines),
+            actionItemRulesEnabled: draftActionItemRulesEnabled,
             actionItemRules: draftActionItemRules.trimmingCharacters(in: .whitespacesAndNewlines),
+            openQuestionRulesEnabled: draftOpenQuestionRulesEnabled,
             openQuestionRules: draftOpenQuestionRules.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyPointRulesEnabled: draftKeyPointRulesEnabled,
             keyPointRules: draftKeyPointRules.trimmingCharacters(in: .whitespacesAndNewlines),
             noiseFilterRules: draftNoiseFilterRules.trimmingCharacters(in: .whitespacesAndNewlines),
             additionalGuidance: draftAdditionalGuidance.trimmingCharacters(in: .whitespacesAndNewlines),

@@ -49,9 +49,13 @@ public enum MeetingTypeDefinitionStatus: String, Codable, Sendable, Equatable {
 public struct PromptComponentSet: Codable, Sendable, Equatable {
     public var objective: String
     public var summaryFocus: String
+    public var decisionRulesEnabled: Bool
     public var decisionRules: String
+    public var actionItemRulesEnabled: Bool
     public var actionItemRules: String
+    public var openQuestionRulesEnabled: Bool
     public var openQuestionRules: String
+    public var keyPointRulesEnabled: Bool
     public var keyPointRules: String
     public var noiseFilterRules: String
     public var additionalGuidance: String
@@ -60,9 +64,13 @@ public struct PromptComponentSet: Codable, Sendable, Equatable {
     public init(
         objective: String,
         summaryFocus: String,
+        decisionRulesEnabled: Bool = true,
         decisionRules: String = "",
+        actionItemRulesEnabled: Bool = true,
         actionItemRules: String = "",
+        openQuestionRulesEnabled: Bool = true,
         openQuestionRules: String = "",
+        keyPointRulesEnabled: Bool = true,
         keyPointRules: String = "",
         noiseFilterRules: String = "",
         additionalGuidance: String = "",
@@ -70,22 +78,89 @@ public struct PromptComponentSet: Codable, Sendable, Equatable {
     ) {
         self.objective = objective
         self.summaryFocus = summaryFocus
+        self.decisionRulesEnabled = decisionRulesEnabled
         self.decisionRules = decisionRules
+        self.actionItemRulesEnabled = actionItemRulesEnabled
         self.actionItemRules = actionItemRules
+        self.openQuestionRulesEnabled = openQuestionRulesEnabled
         self.openQuestionRules = openQuestionRules
+        self.keyPointRulesEnabled = keyPointRulesEnabled
         self.keyPointRules = keyPointRules
         self.noiseFilterRules = noiseFilterRules
         self.additionalGuidance = additionalGuidance
         self.version = max(version, 1)
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case objective
+        case summaryFocus
+        case decisionRulesEnabled
+        case decisionRules
+        case actionItemRulesEnabled
+        case actionItemRules
+        case openQuestionRulesEnabled
+        case openQuestionRules
+        case keyPointRulesEnabled
+        case keyPointRules
+        case noiseFilterRules
+        case additionalGuidance
+        case version
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        objective = try container.decode(String.self, forKey: .objective)
+        summaryFocus = try container.decode(String.self, forKey: .summaryFocus)
+        decisionRulesEnabled = try container.decodeIfPresent(Bool.self, forKey: .decisionRulesEnabled) ?? true
+        decisionRules = try container.decodeIfPresent(String.self, forKey: .decisionRules) ?? ""
+        actionItemRulesEnabled = try container.decodeIfPresent(Bool.self, forKey: .actionItemRulesEnabled) ?? true
+        actionItemRules = try container.decodeIfPresent(String.self, forKey: .actionItemRules) ?? ""
+        openQuestionRulesEnabled = try container.decodeIfPresent(Bool.self, forKey: .openQuestionRulesEnabled) ?? true
+        openQuestionRules = try container.decodeIfPresent(String.self, forKey: .openQuestionRules) ?? ""
+        keyPointRulesEnabled = try container.decodeIfPresent(Bool.self, forKey: .keyPointRulesEnabled) ?? true
+        keyPointRules = try container.decodeIfPresent(String.self, forKey: .keyPointRules) ?? ""
+        noiseFilterRules = try container.decodeIfPresent(String.self, forKey: .noiseFilterRules) ?? ""
+        additionalGuidance = try container.decodeIfPresent(String.self, forKey: .additionalGuidance) ?? ""
+        version = max((try container.decodeIfPresent(Int.self, forKey: .version) ?? 1), 1)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(objective, forKey: .objective)
+        try container.encode(summaryFocus, forKey: .summaryFocus)
+        try container.encode(decisionRulesEnabled, forKey: .decisionRulesEnabled)
+        try container.encode(decisionRules, forKey: .decisionRules)
+        try container.encode(actionItemRulesEnabled, forKey: .actionItemRulesEnabled)
+        try container.encode(actionItemRules, forKey: .actionItemRules)
+        try container.encode(openQuestionRulesEnabled, forKey: .openQuestionRulesEnabled)
+        try container.encode(openQuestionRules, forKey: .openQuestionRules)
+        try container.encode(keyPointRulesEnabled, forKey: .keyPointRulesEnabled)
+        try container.encode(keyPointRules, forKey: .keyPointRules)
+        try container.encode(noiseFilterRules, forKey: .noiseFilterRules)
+        try container.encode(additionalGuidance, forKey: .additionalGuidance)
+        try container.encode(max(version, 1), forKey: .version)
+    }
+
+    public var summarySectionVisibility: MeetingSummarySectionVisibility {
+        MeetingSummarySectionVisibility(
+            decisions: decisionRulesEnabled,
+            actionItems: actionItemRulesEnabled,
+            openQuestions: openQuestionRulesEnabled,
+            keyPoints: keyPointRulesEnabled
+        )
+    }
+
     public func validated(typeID: String = "unknown") throws -> PromptComponentSet {
         let normalized = PromptComponentSet(
             objective: objective.minuteTrimmed,
             summaryFocus: summaryFocus.minuteTrimmed,
+            decisionRulesEnabled: decisionRulesEnabled,
             decisionRules: decisionRules.minuteTrimmed,
+            actionItemRulesEnabled: actionItemRulesEnabled,
             actionItemRules: actionItemRules.minuteTrimmed,
+            openQuestionRulesEnabled: openQuestionRulesEnabled,
             openQuestionRules: openQuestionRules.minuteTrimmed,
+            keyPointRulesEnabled: keyPointRulesEnabled,
             keyPointRules: keyPointRules.minuteTrimmed,
             noiseFilterRules: noiseFilterRules.minuteTrimmed,
             additionalGuidance: additionalGuidance.minuteTrimmed,

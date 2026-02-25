@@ -102,29 +102,53 @@ struct MeetingTypesSettingsSection: View {
 
                 DisclosureGroup(isExpanded: $isAdvancedPromptExpanded) {
                     VStack(alignment: .leading, spacing: 16) {
-                        FieldBlock(title: "Decision Rules", subtitle: "How to identify and phrase decisions.") {
-                            MultilineInput(text: $model.draftDecisionRules, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Decision Rules",
+                            subtitle: "How to identify and phrase decisions.",
+                            text: $model.draftDecisionRules,
+                            isEnabled: $model.draftDecisionRulesEnabled,
+                            isToggleable: true
+                        )
 
-                        FieldBlock(title: "Action Item Rules", subtitle: "How to detect commitments and owners.") {
-                            MultilineInput(text: $model.draftActionItemRules, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Action Item Rules",
+                            subtitle: "How to detect commitments and owners.",
+                            text: $model.draftActionItemRules,
+                            isEnabled: $model.draftActionItemRulesEnabled,
+                            isToggleable: true
+                        )
 
-                        FieldBlock(title: "Open Question Rules", subtitle: "How to capture unresolved issues.") {
-                            MultilineInput(text: $model.draftOpenQuestionRules, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Open Question Rules",
+                            subtitle: "How to capture unresolved issues.",
+                            text: $model.draftOpenQuestionRules,
+                            isEnabled: $model.draftOpenQuestionRulesEnabled,
+                            isToggleable: true
+                        )
 
-                        FieldBlock(title: "Key Point Rules", subtitle: "What context should always be retained.") {
-                            MultilineInput(text: $model.draftKeyPointRules, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Key Point Rules",
+                            subtitle: "What context should always be retained.",
+                            text: $model.draftKeyPointRules,
+                            isEnabled: $model.draftKeyPointRulesEnabled,
+                            isToggleable: true
+                        )
 
-                        FieldBlock(title: "Noise Filter Rules", subtitle: "What should be ignored as non-substantive.") {
-                            MultilineInput(text: $model.draftNoiseFilterRules, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Noise Filter Rules",
+                            subtitle: "What should be ignored as non-substantive.",
+                            text: $model.draftNoiseFilterRules,
+                            isEnabled: .constant(true),
+                            isToggleable: false
+                        )
 
-                        FieldBlock(title: "Additional Guidance", subtitle: "Extra authoring guidance applied to this type.") {
-                            MultilineInput(text: $model.draftAdditionalGuidance, placeholder: "Optional", minHeight: 74)
-                        }
+                        PromptRuleBlock(
+                            title: "Additional Guidance",
+                            subtitle: "Extra authoring guidance applied to this type.",
+                            text: $model.draftAdditionalGuidance,
+                            isEnabled: .constant(true),
+                            isToggleable: false
+                        )
                     }
                     .padding(.top, 8)
                 } label: {
@@ -172,33 +196,44 @@ struct MeetingTypesSettingsSection: View {
                             )
                         }
 
-                        DisclosureGroup("Advanced Classifier Signals", isExpanded: $isAdvancedClassifierExpanded) {
+                        DisclosureGroup(isExpanded: $isAdvancedClassifierExpanded) {
                             VStack(alignment: .leading, spacing: 16) {
-                                FieldBlock(title: "Counter Signals", subtitle: "Cues that should reduce this type's likelihood.") {
-                                    MultilineInput(
-                                        text: $model.draftClassifierCounterSignalsInput,
-                                        placeholder: "Optional",
-                                        minHeight: 74
-                                    )
-                                }
+                                PromptRuleBlock(
+                                    title: "Counter Signals",
+                                    subtitle: "Cues that should reduce this type's likelihood.",
+                                    text: $model.draftClassifierCounterSignalsInput,
+                                    isEnabled: .constant(true),
+                                    isToggleable: false
+                                )
 
-                                FieldBlock(title: "Positive Examples", subtitle: "Examples likely to belong to this type.") {
-                                    MultilineInput(
-                                        text: $model.draftClassifierPositiveExamplesInput,
-                                        placeholder: "Optional",
-                                        minHeight: 74
-                                    )
-                                }
+                                PromptRuleBlock(
+                                    title: "Positive Examples",
+                                    subtitle: "Examples likely to belong to this type.",
+                                    text: $model.draftClassifierPositiveExamplesInput,
+                                    isEnabled: .constant(true),
+                                    isToggleable: false
+                                )
 
-                                FieldBlock(title: "Negative Examples", subtitle: "Examples that should map to other types.") {
-                                    MultilineInput(
-                                        text: $model.draftClassifierNegativeExamplesInput,
-                                        placeholder: "Optional",
-                                        minHeight: 74
-                                    )
-                                }
+                                PromptRuleBlock(
+                                    title: "Negative Examples",
+                                    subtitle: "Examples that should map to other types.",
+                                    text: $model.draftClassifierNegativeExamplesInput,
+                                    isEnabled: .constant(true),
+                                    isToggleable: false
+                                )
                             }
                             .padding(.top, 8)
+                        } label: {
+                            Button {
+                                isAdvancedClassifierExpanded.toggle()
+                            } label: {
+                                HStack {
+                                    Text("Advanced Classifier Signals")
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -439,6 +474,56 @@ private struct FieldBlock<Content: View>: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PromptRuleBlock: View {
+    let title: String
+    let subtitle: String
+    @Binding var text: String
+    @Binding var isEnabled: Bool
+    let isToggleable: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .minuteRowTitle()
+
+                    Text(subtitle)
+                        .minuteCaption()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                if isToggleable {
+                    Toggle("", isOn: $isEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel(Text("\(title) enabled"))
+                }
+            }
+
+            if !isToggleable || isEnabled {
+                MultilineInput(
+                    text: $text,
+                    placeholder: "Optional",
+                    minHeight: 74
+                )
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.minuteSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.minuteOutline, lineWidth: 1)
+        )
     }
 }
 

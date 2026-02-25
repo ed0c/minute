@@ -167,6 +167,10 @@ public actor MeetingPipelineCoordinator {
                 logger.error("Prompt bundle resolution failed: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
                 throw MinuteError.invalidMeetingTypeSelection
             }
+            let sectionVisibility = summarySectionVisibility(
+                for: resolvedPromptBundle.typeId,
+                in: meetingTypeLibrary
+            )
 
             let rawJSON = try await summarizationService.summarize(
                 transcript: timelineText,
@@ -200,7 +204,8 @@ public actor MeetingPipelineCoordinator {
                 transcription: transcription,
                 attributedSegments: attributedSegments,
                 originalAudioData: originalAudioData,
-                participantFrontmatter: participantFrontmatter
+                participantFrontmatter: participantFrontmatter,
+                sectionVisibility: sectionVisibility
             )
 
             if let embeddingsBySpeakerID = suggestionResult?.embeddingsBySpeakerID, !embeddingsBySpeakerID.isEmpty {
@@ -313,7 +318,8 @@ public actor MeetingPipelineCoordinator {
         transcription: TranscriptionResult,
         attributedSegments: [AttributedTranscriptSegment],
         originalAudioData: Data?,
-        participantFrontmatter: MeetingParticipantFrontmatter?
+        participantFrontmatter: MeetingParticipantFrontmatter?,
+        sectionVisibility: MeetingSummarySectionVisibility
     ) throws -> PipelineResult {
         let recordingDate = context.startedAt
         // Use extraction.date if parseable, otherwise fall back to the recording date.
@@ -355,7 +361,8 @@ public actor MeetingPipelineCoordinator {
                 audioDurationSeconds: context.audioDurationSeconds,
                 audioRelativePath: resolvedPaths.audioRelativePath,
                 transcriptRelativePath: resolvedPaths.transcriptRelativePath,
-                participantFrontmatter: participantFrontmatter
+                participantFrontmatter: participantFrontmatter,
+                sectionVisibility: sectionVisibility
             )
             let noteData = Data(noteMarkdown.utf8)
 
@@ -436,6 +443,13 @@ public actor MeetingPipelineCoordinator {
 
         // As a last resort, fall back to the original path (writer will overwrite or throw depending on implementation).
         return (noteRelativePath, audioRelativePath, transcriptRelativePath)
+    }
+
+    private func summarySectionVisibility(
+        for typeID: String,
+        in library: MeetingTypeLibrary
+    ) -> MeetingSummarySectionVisibility {
+        library.definition(for: typeID)?.promptComponents.summarySectionVisibility ?? .allEnabled
     }
 
     private func diarizeIfPossible(wavURL: URL, embeddingExportURL: URL?) async -> [SpeakerSegment] {

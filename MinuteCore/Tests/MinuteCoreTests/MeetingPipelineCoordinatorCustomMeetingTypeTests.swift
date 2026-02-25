@@ -79,6 +79,44 @@ struct MeetingPipelineCoordinatorCustomMeetingTypeTests {
     }
 
     @Test
+    func execute_manualCustomSelection_omitsDisabledSummarySectionsInRenderedNote() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let custom = PromptLibraryFixture.customDefinition(
+            typeId: "custom-product-sync",
+            displayName: "Product Sync",
+            promptComponents: PromptLibraryFixture.promptComponents(
+                objective: "Summarize product sync outcomes.",
+                summaryFocus: "Capture key actions and context.",
+                decisionRulesEnabled: false,
+                actionItemRulesEnabled: true,
+                openQuestionRulesEnabled: false,
+                keyPointRulesEnabled: true
+            )
+        )
+        let library = PromptLibraryFixture.defaultLibraryWithCustom(custom: custom)
+        let summarizationService = CapturingSummarizationService()
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            summarizationService: summarizationService,
+            library: library
+        )
+        let context = try makePipelineContext(
+            meetingTypeSelection: MeetingTypeSelection(selectionMode: .manual, selectedTypeId: custom.typeId),
+            fallbackMeetingType: .general
+        )
+
+        let outputs = try await coordinator.execute(context: context)
+        let noteBody = try String(contentsOf: outputs.noteURL, encoding: .utf8)
+
+        #expect(!noteBody.contains("## Decisions"))
+        #expect(noteBody.contains("## Action Items"))
+        #expect(!noteBody.contains("## Open Questions"))
+        #expect(noteBody.contains("## Key Points"))
+    }
+
+    @Test
     func execute_whenManualSelectionReferencesDeletedCustomType_throwsInvalidSelection() async throws {
         let vaultRootURL = try makeTemporaryVault()
         defer { try? FileManager.default.removeItem(at: vaultRootURL) }
