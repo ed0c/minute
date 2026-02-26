@@ -7,6 +7,8 @@ public actor MeetingPipelineCoordinator {
     private let audioLoudnessNormalizer: any AudioLoudnessNormalizing
     private let summarizationServiceProvider: @Sendable () -> any SummarizationServicing
     private let modelManager: any ModelManaging
+    private let meetingTypeLibraryStore: any MeetingTypeLibraryStoring
+    private let promptBundleResolver: any ResolvedPromptBundleResolving
     private let vaultAccess: VaultAccess
     private let vaultWriter: any VaultWriting
     private let speakerProfileStore: SpeakerProfileStore
@@ -21,6 +23,8 @@ public actor MeetingPipelineCoordinator {
         summarizationServiceProvider: @escaping @Sendable () -> any SummarizationServicing,
         audioLoudnessNormalizer: any AudioLoudnessNormalizing = NoOpAudioLoudnessNormalizer(),
         modelManager: some ModelManaging,
+        meetingTypeLibraryStore: any MeetingTypeLibraryStoring = MeetingTypeLibraryStore(),
+        promptBundleResolver: any ResolvedPromptBundleResolving = ResolvedPromptBundleResolver(),
         vaultAccess: VaultAccess,
         vaultWriter: some VaultWriting,
         speakerProfileStore: SpeakerProfileStore = SpeakerProfileStore(),
@@ -32,6 +36,8 @@ public actor MeetingPipelineCoordinator {
         self.audioLoudnessNormalizer = audioLoudnessNormalizer
         self.summarizationServiceProvider = summarizationServiceProvider
         self.modelManager = modelManager
+        self.meetingTypeLibraryStore = meetingTypeLibraryStore
+        self.promptBundleResolver = promptBundleResolver
         self.vaultAccess = vaultAccess
         self.vaultWriter = vaultWriter
         self.speakerProfileStore = speakerProfileStore
@@ -127,19 +133,55 @@ public actor MeetingPipelineCoordinator {
 
             let summarizationService = summarizationServiceProvider()
             let meetingDate = context.startedAt
-            
+
+            let meetingTypeLibrary = meetingTypeLibraryStore.load()
             var effectiveType = context.meetingType
-            if effectiveType == .autodetect {
-                effectiveType = try await summarizationService.classify(transcript: timelineText)
-                logger.info("Autodetected meeting type: \(effectiveType.rawValue, privacy: .public)")
+            var autodetectResolvedTypeID: String? = nil
+            if context.meetingTypeSelection.selectionMode == .autodetect {
+                let fallbackTypeID = MeetingType.general.rawValue
+                let classifierCandidates = makeClassifierCandidates(library: meetingTypeLibrary)
+                let resolvedTypeID = try await summarizationService.classify(
+                    transcript: timelineText,
+                    candidates: classifierCandidates,
+                    fallbackTypeID: fallbackTypeID
+                )
+
+                autodetectResolvedTypeID = resolvedTypeID
+                effectiveType = MeetingType(rawValue: resolvedTypeID) ?? .general
+                logger.info("Autodetected meeting type ID: \(resolvedTypeID, privacy: .public)")
+            } else {
+                let selectedTypeID = context.meetingTypeSelection.selectedTypeId
+                effectiveType = MeetingType(rawValue: selectedTypeID) ?? context.meetingType
             }
-            
+
+            let resolvedPromptBundle: ResolvedPromptBundle
+            do {
+                resolvedPromptBundle = try promptBundleResolver.resolvePromptBundle(
+                    library: meetingTypeLibrary,
+                    selection: context.meetingTypeSelection,
+                    languageProcessing: context.languageProcessing,
+                    outputLanguage: context.outputLanguage,
+                    autodetectResolvedTypeID: autodetectResolvedTypeID
+                )
+            } catch ResolvedPromptBundleResolverError.selectedTypeUnavailable(let typeID) {
+                logger.error("Prompt bundle resolution failed due to unavailable meeting type: \(typeID, privacy: .public)")
+                throw MinuteError.invalidMeetingTypeSelection
+            } catch {
+                logger.error("Prompt bundle resolution failed unexpectedly: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
+                throw error
+            }
+            let sectionVisibility = summarySectionVisibility(
+                for: resolvedPromptBundle.typeId,
+                in: meetingTypeLibrary
+            )
+
             let rawJSON = try await summarizationService.summarize(
                 transcript: timelineText,
                 meetingDate: meetingDate,
                 meetingType: effectiveType,
                 languageProcessing: context.languageProcessing,
-                outputLanguage: context.outputLanguage
+                outputLanguage: context.outputLanguage,
+                resolvedPromptBundle: resolvedPromptBundle
             )
             var extraction = try await decodeOrRepairExtraction(
                 rawJSON: rawJSON,
@@ -165,7 +207,8 @@ public actor MeetingPipelineCoordinator {
                 transcription: transcription,
                 attributedSegments: attributedSegments,
                 originalAudioData: originalAudioData,
-                participantFrontmatter: participantFrontmatter
+                participantFrontmatter: participantFrontmatter,
+                sectionVisibility: sectionVisibility
             )
 
             if let embeddingsBySpeakerID = suggestionResult?.embeddingsBySpeakerID, !embeddingsBySpeakerID.isEmpty {
@@ -188,6 +231,50 @@ public actor MeetingPipelineCoordinator {
             cleanupTemporaryArtifacts(for: context, policy: .workingDirectoryOnly)
             throw error
         }
+    }
+
+    private func makeClassifierCandidates(library: MeetingTypeLibrary) -> [MeetingTypeClassifierCandidate] {
+        var candidates: [MeetingTypeClassifierCandidate] = []
+        candidates.reserveCapacity(library.activeDefinitions.count)
+
+        for definition in library.activeDefinitions {
+            if definition.typeId == MeetingType.autodetect.rawValue {
+                continue
+            }
+
+            if definition.source == .custom && !definition.autodetectEligible {
+                continue
+            }
+
+            let fallbackSignals = [definition.displayName]
+            let profileSignals = definition.classifierProfile?.strongSignals ?? []
+            let strongSignals = (profileSignals.isEmpty ? fallbackSignals : profileSignals)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let label = (definition.classifierProfile?.label ?? definition.displayName)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { continue }
+
+            candidates.append(
+                MeetingTypeClassifierCandidate(
+                    typeId: definition.typeId,
+                    label: label,
+                    strongSignals: strongSignals
+                )
+            )
+        }
+
+        if !candidates.contains(where: { $0.typeId == MeetingType.general.rawValue }) {
+            candidates.append(
+                MeetingTypeClassifierCandidate(
+                    typeId: MeetingType.general.rawValue,
+                    label: MeetingType.general.displayName,
+                    strongSignals: ["general business discussion"]
+                )
+            )
+        }
+
+        return candidates
     }
 
     private func decodeOrRepairExtraction(
@@ -234,7 +321,8 @@ public actor MeetingPipelineCoordinator {
         transcription: TranscriptionResult,
         attributedSegments: [AttributedTranscriptSegment],
         originalAudioData: Data?,
-        participantFrontmatter: MeetingParticipantFrontmatter?
+        participantFrontmatter: MeetingParticipantFrontmatter?,
+        sectionVisibility: MeetingSummarySectionVisibility
     ) throws -> PipelineResult {
         let recordingDate = context.startedAt
         // Use extraction.date if parseable, otherwise fall back to the recording date.
@@ -276,7 +364,8 @@ public actor MeetingPipelineCoordinator {
                 audioDurationSeconds: context.audioDurationSeconds,
                 audioRelativePath: resolvedPaths.audioRelativePath,
                 transcriptRelativePath: resolvedPaths.transcriptRelativePath,
-                participantFrontmatter: participantFrontmatter
+                participantFrontmatter: participantFrontmatter,
+                sectionVisibility: sectionVisibility
             )
             let noteData = Data(noteMarkdown.utf8)
 
@@ -357,6 +446,13 @@ public actor MeetingPipelineCoordinator {
 
         // As a last resort, fall back to the original path (writer will overwrite or throw depending on implementation).
         return (noteRelativePath, audioRelativePath, transcriptRelativePath)
+    }
+
+    private func summarySectionVisibility(
+        for typeID: String,
+        in library: MeetingTypeLibrary
+    ) -> MeetingSummarySectionVisibility {
+        library.definition(for: typeID)?.promptComponents.summarySectionVisibility ?? .allEnabled
     }
 
     private func diarizeIfPossible(wavURL: URL, embeddingExportURL: URL?) async -> [SpeakerSegment] {

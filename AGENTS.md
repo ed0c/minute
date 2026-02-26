@@ -157,6 +157,8 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
 - Existing local settings persistence (`UserDefaults` + local file-backed app state where already used); no new storage systems (012-settings-improvements)
 - Swift 5.9+ (Xcode 15.x), Swift tools 6.2 for `MinuteCore` package + SwiftUI, Combine, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore package modules (013-simplify-architecture)
 - Local files (vault outputs and temporary session artifacts) + local preferences in `UserDefaults` (013-simplify-architecture)
+- Swift 5.9+ (Xcode 15.x), Swift tools 6.2 (`MinuteCore`) + SwiftUI, Combine, MinuteCore pipeline/services, MinuteLlama summarization service, existing UserDefaults-backed settings stores (014-custom-meeting-prompts)
+- Local-only persistence via `UserDefaults` (+ optional local JSON snapshot for prompt library migrations if needed); existing vault outputs remain unchanged (014-custom-meeting-prompts)
 
 ## Recent Changes
 - 011-vocabulary-boosting: Added Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components

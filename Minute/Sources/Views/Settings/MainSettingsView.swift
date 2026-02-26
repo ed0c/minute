@@ -5,6 +5,7 @@ struct MainSettingsView: View {
     @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var vaultModel = VaultSettingsModel()
     @StateObject private var modelsModel = ModelsSettingsViewModel()
+    @StateObject private var meetingTypesModel = MeetingTypesSettingsViewModel()
 
     @AppStorage("minute.settings.lastCategoryID")
     private var lastCategoryIDRaw: String = SettingsCategoryDefinition.ID.general.rawValue
@@ -56,6 +57,10 @@ struct MainSettingsView: View {
                     case .ai:
                         Form {
                             ModelsSettingsSection(model: modelsModel)
+                        }
+                    case .meetingTypes:
+                        Form {
+                            MeetingTypesSettingsSection(model: meetingTypesModel)
                         }
                     case .updates:
                         Form {

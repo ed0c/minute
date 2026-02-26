@@ -10,6 +10,7 @@
 		0E0A182A0E8F4C1792A8B075 /* MinuteLlama in Frameworks */ = {isa = PBXBuildFile; productRef = B730481B2E3B4E5FB8E38D6E /* MinuteLlama */; };
 		1A2B3C4D5E6F7890ABCDEF12 /* StageDropValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E7D1B0A9B34B87B2E6A123 /* StageDropValidationTests.swift */; };
 		1DBD0C88C2F54CA78D084F61 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 3B3599BC65E149678727D1B7 /* Sparkle */; settings = {ATTRIBUTES = (Weak, ); }; };
+		2D3E4F5A6B7C8D9E0F1A2B3C /* MeetingTypesSettingsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4F5A6B7C8D9E0F1A2B3C4D /* MeetingTypesSettingsViewModelTests.swift */; };
 		58B6950C2EF600000068FAA7 /* MinuteCore in Frameworks */ = {isa = PBXBuildFile; productRef = 58B6950B2EF600000068FAA7 /* MinuteCore */; };
 		5A7F52052F1F0D0A00D8E124 /* WhisperXPCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7F52022F1F0D0A00D8E124 /* WhisperXPCService.swift */; };
 		5A7F52062F1F0D0A00D8E124 /* MinuteWhisperService.xpc in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5A7F52012F1F0D0A00D8E124 /* MinuteWhisperService.xpc */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -65,10 +66,12 @@
 		5A7F52022F1F0D0A00D8E124 /* WhisperXPCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperXPCService.swift; sourceTree = "<group>"; };
 		5A7F52032F1F0D0A00D8E124 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5F15E3BAE1404A58B205DD07 /* MinuteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinuteTests.swift; sourceTree = "<group>"; };
+		3E4F5A6B7C8D9E0F1A2B3C4D /* MeetingTypesSettingsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTypesSettingsViewModelTests.swift; sourceTree = "<group>"; };
 		779C02330F8D485BB5682A48 /* MinuteInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = MinuteInfo.plist; sourceTree = "<group>"; };
 		7D2B8C3F4E5A6B7C8D9E0F11 /* MeetingPipelineViewModelVocabularyOverrideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipelineViewModelVocabularyOverrideTests.swift; sourceTree = "<group>"; };
 		7D2B8C3F4E5A6B7C8D9E0F12 /* ModelsSettingsViewModelVocabularyBoostingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsSettingsViewModelVocabularyBoostingTests.swift; sourceTree = "<group>"; };
 		7D2B8C3F4E5A6B7C8D9E0F13 /* ModelsSettingsViewModelVocabularyGatingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsSettingsViewModelVocabularyGatingTests.swift; sourceTree = "<group>"; };
+		7E8F901A2B3C4D5E6F708192 /* MeetingPipelineViewModelMeetingTypeSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipelineViewModelMeetingTypeSafetyTests.swift; sourceTree = "<group>"; };
 		8ADB76E0C8D7477E9C5E50D2 /* MinuteTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MinuteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1D2C3B4E5F6478899AABBCC /* MeetingDetailNoRegressionSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailNoRegressionSmokeTests.swift; sourceTree = "<group>"; };
 		A3F6C0A0B4D94B0B9F4E0C1A /* MeetingPipelineViewModelCancelSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipelineViewModelCancelSessionTests.swift; sourceTree = "<group>"; };
@@ -156,6 +159,8 @@
 				A3F6C0A0B4D94B0B9F4E0C1A /* MeetingPipelineViewModelCancelSessionTests.swift */,
 				D4E7D1B0A9B34B87B2E6A123 /* StageDropValidationTests.swift */,
 				A1D2C3B4E5F6478899AABBCC /* MeetingDetailNoRegressionSmokeTests.swift */,
+				7E8F901A2B3C4D5E6F708192 /* MeetingPipelineViewModelMeetingTypeSafetyTests.swift */,
+				3E4F5A6B7C8D9E0F1A2B3C4D /* MeetingTypesSettingsViewModelTests.swift */,
 				E1A9F20B6C3D4E5F8091A2B3 /* TestSupport/SilenceAutoStopTestSupport.swift */,
 				F3B5D810D2F6495798C6A541 /* UpdaterProfileBehaviorTests.swift */,
 				A4D6E9209D1B4E43B5E7C652 /* UpdaterViewModelProfileTests.swift */,
@@ -431,6 +436,7 @@
 				B6A1D9E2F3C44C7AA1B2C3D4 /* MeetingPipelineViewModelCancelSessionTests.swift in Sources */,
 				1A2B3C4D5E6F7890ABCDEF12 /* StageDropValidationTests.swift in Sources */,
 				C7F3A9E4D2B8410FA1C0B2D3 /* MeetingDetailNoRegressionSmokeTests.swift in Sources */,
+				2D3E4F5A6B7C8D9E0F1A2B3C /* MeetingTypesSettingsViewModelTests.swift in Sources */,
 				F2B1C3D4E5F60718293A4B5C /* TestSupport/SilenceAutoStopTestSupport.swift in Sources */,
 				E1A9B130B6454F8794F15621 /* UpdaterProfileBehaviorTests.swift in Sources */,
 				D2A7C3307EAF4A36A8D4F932 /* UpdaterViewModelProfileTests.swift in Sources */,
@@ -589,7 +595,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 9U6KWJQQVG;
 				ENABLE_APP_SANDBOX = YES;
@@ -618,7 +624,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 0.18.2;
+				MARKETING_VERSION = 0.19.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) $(MINUTE_SWIFT_DISTRIBUTION_FLAG)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.roblibob.Minute;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -648,7 +654,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 26;
+				CURRENT_PROJECT_VERSION = 27;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=macosx*]" = 9U6KWJQQVG;
@@ -684,7 +690,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 0.18.2;
+				MARKETING_VERSION = 0.19.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) $(MINUTE_SWIFT_DISTRIBUTION_FLAG)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.roblibob.Minute;
 				PRODUCT_NAME = "$(TARGET_NAME)";

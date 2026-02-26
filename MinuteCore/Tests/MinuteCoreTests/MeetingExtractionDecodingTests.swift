@@ -28,4 +28,22 @@ struct MeetingExtractionDecodingTests {
         expectEqual(extraction.openQuestions, ["Do we need ffmpeg?"])
         expectEqual(extraction.keyPoints, ["Local-only processing"])
     }
+
+    @Test
+    func decoding_whenOptionalOutputArraysAreMissing_defaultsToEmpty() throws {
+        let json = #"""
+        {
+          "title": "Weekly Sync",
+          "date": "2025-12-19",
+          "summary": "We aligned on next steps."
+        }
+        """#
+
+        let extraction = try JSONDecoder().decode(MeetingExtraction.self, from: Data(json.utf8))
+
+        expectEqual(extraction.decisions, [])
+        expectEqual(extraction.actionItems, [])
+        expectEqual(extraction.openQuestions, [])
+        expectEqual(extraction.keyPoints, [])
+    }
 }

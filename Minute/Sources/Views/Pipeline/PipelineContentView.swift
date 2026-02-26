@@ -50,12 +50,14 @@ struct PipelineContentView: View {
                                     .transaction { transaction in
                                         transaction.animation = nil
                                     }
+                                    .zIndex(0)
 
                                 floatingControlBar
                                     .frame(maxWidth: 720)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: floatingBarHeight, alignment: .bottom)
                                     .padding(.bottom, isCompactLayout ? 12 : 22)
+                                    .zIndex(2)
 
                                 if let status = statusDrawerModel {
                                     StatusDrawerView(model: status, isCompact: isCompactLayout)
@@ -64,6 +66,7 @@ struct PipelineContentView: View {
                                         .padding(.bottom, statusDrawerBottomPadding(isCompact: isCompactLayout))
                                         .transition(.move(edge: .bottom).combined(with: .opacity))
                                         .animation(.easeInOut(duration: 0.2), value: statusDrawerModel != nil)
+                                        .zIndex(3)
                                 }
                             }
                         }
