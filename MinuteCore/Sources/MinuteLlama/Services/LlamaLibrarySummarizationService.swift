@@ -109,7 +109,7 @@ public struct LlamaLibrarySummarizationService: SummarizationServicing {
         }
 
         logger.info(
-            "Summarization system prompt [meetingType=\(meetingType.rawValue, privacy: .public), languageProcessing=\(languageProcessing.rawValue, privacy: .public), outputLanguage=\(outputLanguage.rawValue, privacy: .public)]: \(systemPrompt, privacy: .public)"
+            "Summarization system prompt [meetingType=\(meetingType.rawValue, privacy: .public), languageProcessing=\(languageProcessing.rawValue, privacy: .public), outputLanguage=\(outputLanguage.rawValue, privacy: .public), length=\(systemPrompt.count, privacy: .public), hash=\(systemPrompt, privacy: .private(mask: .hash))]"
         )
 
         return try await runLlama(
@@ -160,8 +160,8 @@ public struct LlamaLibrarySummarizationService: SummarizationServicing {
     }
 
     public func repairJSON(_ invalidJSON: String) async throws -> String {
-        // Repair prompt usually doesn't need system/user separation rigidly, 
-        // using the old single-prompt style as a user message is fine, 
+        // Repair prompt usually doesn't need system/user separation rigidly,
+        // using the old single-prompt style as a user message is fine,
         // or we can adapt to system/user if we had a RepairStrategy.
         // For now, keeping it simple: treat it as user message.
         try await runLlama(systemPrompt: nil, userPrompt: PromptBuilder.repairPrompt(invalidOutput: invalidJSON))

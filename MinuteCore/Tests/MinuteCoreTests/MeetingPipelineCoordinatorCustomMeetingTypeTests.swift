@@ -150,6 +150,34 @@ struct MeetingPipelineCoordinatorCustomMeetingTypeTests {
             }
         }
     }
+
+    @Test
+    func execute_whenPromptResolverThrowsUnexpectedError_rethrowsOriginalError() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let summarizationService = CapturingSummarizationService()
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            summarizationService: summarizationService,
+            library: .default,
+            promptBundleResolver: ThrowingPromptBundleResolver()
+        )
+
+        let context = try makePipelineContext(
+            meetingTypeSelection: MeetingTypeSelection(selectionMode: .manual, selectedTypeId: MeetingType.general.rawValue),
+            fallbackMeetingType: .general
+        )
+
+        do {
+            _ = try await coordinator.execute(context: context)
+            Issue.record("Expected prompt resolver failure")
+        } catch let error as PipelinePromptResolverInjectedError {
+            #expect(error == .injected)
+        } catch {
+            Issue.record("Expected PipelinePromptResolverInjectedError, got \(error)")
+        }
+    }
 }
 
 private struct CapturedSummarizeCall: Sendable {
@@ -255,6 +283,27 @@ private struct PipelineCustomTypeDiarizationService: DiarizationServicing {
     }
 }
 
+private enum PipelinePromptResolverInjectedError: Error, Equatable {
+    case injected
+}
+
+private struct ThrowingPromptBundleResolver: ResolvedPromptBundleResolving {
+    func resolvePromptBundle(
+        library: MeetingTypeLibrary,
+        selection: MeetingTypeSelection,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        autodetectResolvedTypeID: String?
+    ) throws -> ResolvedPromptBundle {
+        _ = library
+        _ = selection
+        _ = languageProcessing
+        _ = outputLanguage
+        _ = autodetectResolvedTypeID
+        throw PipelinePromptResolverInjectedError.injected
+    }
+}
+
 private struct PipelineCustomTypeModelManager: ModelManaging {
     func ensureModelsPresent(progress: (@Sendable (ModelDownloadProgress) -> Void)?) async throws {
         progress?(ModelDownloadProgress(fractionCompleted: 1, label: "ready"))
@@ -303,7 +352,8 @@ private final class PipelineCustomTypeBookmarkStore: VaultBookmarkStoring {
 private func makeCoordinator(
     vaultRootURL: URL,
     summarizationService: CapturingSummarizationService,
-    library: MeetingTypeLibrary
+    library: MeetingTypeLibrary,
+    promptBundleResolver: any ResolvedPromptBundleResolving = ResolvedPromptBundleResolver()
 ) -> MeetingPipelineCoordinator {
     let bookmark = try? VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
     let bookmarkStore = PipelineCustomTypeBookmarkStore(bookmark: bookmark)
@@ -315,7 +365,7 @@ private func makeCoordinator(
         summarizationServiceProvider: { summarizationService },
         modelManager: PipelineCustomTypeModelManager(),
         meetingTypeLibraryStore: MockMeetingTypeLibraryStore(library: library),
-        promptBundleResolver: ResolvedPromptBundleResolver(),
+        promptBundleResolver: promptBundleResolver,
         vaultAccess: vaultAccess,
         vaultWriter: PipelineCustomTypeVaultWriter()
     )

@@ -83,6 +83,27 @@ struct MeetingTypeLibraryStoreTests {
         expectEqual(loaded.definitions.map(\.typeId), MeetingTypeLibrary.default.definitions.map(\.typeId))
     }
 
+    @Test
+    func createCustomType_whenCalledConcurrently_preservesAllUniqueWrites() throws {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+        let iterations = 40
+
+        DispatchQueue.concurrentPerform(iterations: iterations) { index in
+            let components = PromptLibraryFixture.promptComponents(
+                objective: "Objective \(index)",
+                summaryFocus: "Summary focus \(index)"
+            )
+            _ = try? store.createCustomType(
+                displayName: "Concurrent Type \(index)",
+                promptComponents: components
+            )
+        }
+
+        let activeCustomTypes = store.load().activeDefinitions.filter { $0.source == .custom }
+        expectEqual(activeCustomTypes.count, iterations)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "MeetingTypeLibraryStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

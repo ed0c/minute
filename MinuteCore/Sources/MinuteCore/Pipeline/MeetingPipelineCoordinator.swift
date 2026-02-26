@@ -163,9 +163,12 @@ public actor MeetingPipelineCoordinator {
                     outputLanguage: context.outputLanguage,
                     autodetectResolvedTypeID: autodetectResolvedTypeID
                 )
-            } catch {
-                logger.error("Prompt bundle resolution failed: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
+            } catch ResolvedPromptBundleResolverError.selectedTypeUnavailable(let typeID) {
+                logger.error("Prompt bundle resolution failed due to unavailable meeting type: \(typeID, privacy: .public)")
                 throw MinuteError.invalidMeetingTypeSelection
+            } catch {
+                logger.error("Prompt bundle resolution failed unexpectedly: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
+                throw error
             }
             let sectionVisibility = summarySectionVisibility(
                 for: resolvedPromptBundle.typeId,
