@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 @testable import Minute
-@testable import MinuteCore
+@preconcurrency @testable import MinuteCore
 
 struct MinuteTests {
     @Test
@@ -97,6 +97,72 @@ struct PipelineDefaultsObserverParityTests {
         #expect(domains.transcriptionBackendChanged)
         #expect(domains.vaultStatusChanged == false)
         #expect(domains.outputLanguageChanged == false)
+    }
+}
+
+@MainActor
+struct MeetingPipelineViewModelLanguageProcessingTitleParityTests {
+    @Test
+    func forcedInputLanguage_updatesLanguageProcessingTitles() throws {
+        let suite = "MeetingPipelineViewModelLanguageProcessingTitleParityTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(TranscriptionLanguage.english.rawValue, forKey: AppConfiguration.Defaults.transcriptionLanguageKey)
+        defaults.set(OutputLanguage.englishUS.rawValue, forKey: AppConfiguration.Defaults.outputLanguageKey)
+
+        let stageStore = StagePreferencesStore(defaults: defaults)
+        stageStore.clear()
+
+        let backendStore = TranscriptionBackendSelectionStore(defaults: defaults)
+        backendStore.setSelectedBackendID(TranscriptionBackend.whisper.rawValue)
+
+        let model = try makeLanguageTitleModel(
+            defaults: defaults,
+            stagePreferencesStore: stageStore,
+            transcriptionBackendStore: backendStore
+        )
+
+        #expect(model.autoToEnglishOptionTitle == "English -> English")
+        #expect(model.autoToPickedLanguageOptionTitle == "English -> English (United States)")
+    }
+
+    private func makeLanguageTitleModel(
+        defaults: UserDefaults,
+        stagePreferencesStore: StagePreferencesStore,
+        transcriptionBackendStore: TranscriptionBackendSelectionStore
+    ) throws -> MeetingPipelineViewModel {
+        let vaultRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-language-title-vault-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultRoot, withIntermediateDirectories: true)
+        let bookmark = try VaultAccess.makeBookmarkData(forVaultRootURL: vaultRoot)
+        let vaultAccess = VaultAccess(bookmarkStore: InMemoryVaultBookmarkStore(bookmark: bookmark))
+
+        let coordinator = MeetingPipelineCoordinator(
+            transcriptionService: MockTranscriptionService(),
+            diarizationService: MockDiarizationService(),
+            summarizationServiceProvider: { MockSummarizationService() },
+            modelManager: MockModelManager(),
+            vaultAccess: vaultAccess,
+            vaultWriter: DefaultVaultWriter()
+        )
+
+        return MeetingPipelineViewModel(
+            audioService: MockAudioService(),
+            mediaImportService: MockMediaImportService(),
+            recoveryService: MockRecordingRecoveryService(),
+            pipelineCoordinator: coordinator,
+            screenContextCaptureService: ScreenContextCaptureService(inferencer: MockScreenContextInferenceService()),
+            screenContextVideoExtractor: ScreenContextVideoFrameExtractor(inferencer: MockScreenContextInferenceService()),
+            screenContextSettingsStore: ScreenContextSettingsStore(),
+            vaultAccess: vaultAccess,
+            recordingPermissions: .alwaysGranted(),
+            stagePreferencesStore: stagePreferencesStore,
+            transcriptionBackendStore: transcriptionBackendStore,
+            meetingTypeLibraryStore: MeetingTypeLibraryStore(defaults: defaults, libraryKey: "meetingTypeLibrary"),
+            defaults: defaults
+        )
     }
 }
 

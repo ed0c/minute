@@ -6,6 +6,7 @@ struct PipelineDefaultsObserver {
         var vaultRootBookmark: Data?
         var vaultRootPathDisplay: String?
         var outputLanguageRawValue: String?
+        var transcriptionLanguageRawValue: String?
         var transcriptionBackendID: String?
         var vocabularySettings: GlobalVocabularyBoostingSettings
     }
@@ -14,6 +15,7 @@ struct PipelineDefaultsObserver {
         var requiresFullRefresh: Bool
         var vaultStatusChanged: Bool
         var outputLanguageChanged: Bool
+        var transcriptionLanguageChanged: Bool
         var transcriptionBackendChanged: Bool
         var vocabularySettingsChanged: Bool
 
@@ -21,6 +23,7 @@ struct PipelineDefaultsObserver {
             requiresFullRefresh
                 || vaultStatusChanged
                 || outputLanguageChanged
+                || transcriptionLanguageChanged
                 || transcriptionBackendChanged
                 || vocabularySettingsChanged
         }
@@ -35,6 +38,7 @@ struct PipelineDefaultsObserver {
             vaultRootBookmark: defaults.data(forKey: AppConfiguration.Defaults.vaultRootBookmarkKey),
             vaultRootPathDisplay: defaults.string(forKey: AppConfiguration.Defaults.vaultRootPathDisplayKey),
             outputLanguageRawValue: defaults.string(forKey: AppConfiguration.Defaults.outputLanguageKey),
+            transcriptionLanguageRawValue: defaults.string(forKey: AppConfiguration.Defaults.transcriptionLanguageKey),
             transcriptionBackendID: transcriptionBackendID,
             vocabularySettings: vocabularySettings
         )
@@ -46,6 +50,7 @@ struct PipelineDefaultsObserver {
                 requiresFullRefresh: true,
                 vaultStatusChanged: true,
                 outputLanguageChanged: true,
+                transcriptionLanguageChanged: true,
                 transcriptionBackendChanged: true,
                 vocabularySettingsChanged: true
             )
@@ -57,6 +62,8 @@ struct PipelineDefaultsObserver {
                 previous.vaultRootBookmark != current.vaultRootBookmark
                 || previous.vaultRootPathDisplay != current.vaultRootPathDisplay,
             outputLanguageChanged: previous.outputLanguageRawValue != current.outputLanguageRawValue,
+            transcriptionLanguageChanged:
+                previous.transcriptionLanguageRawValue != current.transcriptionLanguageRawValue,
             transcriptionBackendChanged: previous.transcriptionBackendID != current.transcriptionBackendID,
             vocabularySettingsChanged: previous.vocabularySettings != current.vocabularySettings
         )

@@ -28,6 +28,11 @@ struct ModelsSettingsSection: View {
                         models: model.transcriptionModels,
                         selection: $model.selectedTranscriptionModelID
                     )
+
+                    TranscriptionLanguagePicker(
+                        languages: model.transcriptionLanguages,
+                        selection: $model.selectedTranscriptionLanguage
+                    )
                 }
 
                 Divider()

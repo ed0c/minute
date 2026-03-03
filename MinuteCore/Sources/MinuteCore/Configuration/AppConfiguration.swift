@@ -21,6 +21,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let micActivityNotificationsEnabledKey = "micActivityNotificationsEnabled"
         public static let knownSpeakerSuggestionsEnabledKey = "knownSpeakerSuggestionsEnabled"
         public static let outputLanguageKey = "outputLanguage"
+        public static let transcriptionLanguageKey = "transcriptionLanguage"
         public static let vocabularyBoostingEnabledKey = "vocabularyBoostingEnabled"
         public static let vocabularyBoostingTermsKey = "vocabularyBoostingTerms"
         public static let vocabularyBoostingStrengthKey = "vocabularyBoostingStrength"
@@ -48,6 +49,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let defaultFluidAudioAsrModelID = FluidAudioASRModelCatalog.defaultModelID
         public static let defaultVocabularyBoostingEnabled = false
         public static let defaultVocabularyBoostingStrength = VocabularyBoostingStrength.balanced
+        public static let defaultTranscriptionLanguage = TranscriptionLanguage.defaultSelection
 
         public static let defaultStageMeetingType = MeetingType.autodetect
         public static let defaultStageMeetingTypeID = MeetingType.autodetect.rawValue
