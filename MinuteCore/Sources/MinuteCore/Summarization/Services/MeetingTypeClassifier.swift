@@ -7,6 +7,18 @@
 
 import Foundation
 
+public struct MeetingTypeClassifierCandidate: Sendable, Equatable {
+    public var typeId: String
+    public var label: String
+    public var strongSignals: [String]
+
+    public init(typeId: String, label: String, strongSignals: [String]) {
+        self.typeId = typeId
+        self.label = label
+        self.strongSignals = strongSignals
+    }
+}
+
 public enum MeetingTypeClassifier {
 
     private static let allowedOutputLabels: [String] = [
@@ -79,6 +91,46 @@ public enum MeetingTypeClassifier {
         \(snippet)
         """
     }
+
+    /// Generates a classifier prompt for built-in and custom candidates.
+    public static func prompt(
+        for transcript: String,
+        candidates: [MeetingTypeClassifierCandidate],
+        fallbackLabel: String
+    ) -> String {
+        let maxSnippetCharacters = 3_000
+        let snippet = String(transcript.prefix(maxSnippetCharacters))
+        let normalizedCandidates = normalizedCandidates(from: candidates)
+        let labels = normalizedCandidates.map(\.label)
+        let allowedLabels = labels.joined(separator: "\n- ")
+        let fallback = fallbackLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidateGuidance = normalizedCandidates
+            .map { candidate in
+                let signals = candidate.strongSignals.isEmpty
+                    ? "No strong signals provided."
+                    : candidate.strongSignals.map { "\"\($0)\"" }.joined(separator: ", ")
+                return "- \(candidate.label): \(signals)"
+            }
+            .joined(separator: "\n")
+
+        return """
+        You are a strict meeting-type classifier.
+
+        Task: Choose exactly one label from the allowed list below.
+        Allowed labels (return EXACTLY one, no extra text):
+        - \(allowedLabels)
+
+        Conservative rule: if uncertain, low-information, or mixed signals, return \(fallback).
+
+        Candidate guidance:
+        \(candidateGuidance)
+
+        Output format: return only the label, with exact spelling from allowed labels.
+
+        Transcript snippet:
+        \(snippet)
+        """
+    }
     
     /// Parses the LLM response into a MeetingType.
     /// - Parameter response: The raw string response from the LLM.
@@ -96,5 +148,49 @@ public enum MeetingTypeClassifier {
         case "planning": return .planning
         default: return .general
         }
+    }
+
+    public static func parseResponse(
+        _ response: String,
+        candidates: [MeetingTypeClassifierCandidate],
+        fallbackTypeID: String
+    ) -> String {
+        let normalized = response.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedCandidates = normalizedCandidates(from: candidates)
+        let match = normalizedCandidates.first { $0.label.lowercased() == normalized }
+        return match?.typeId ?? fallbackTypeID
+    }
+
+    private static func normalizedCandidates(
+        from candidates: [MeetingTypeClassifierCandidate]
+    ) -> [MeetingTypeClassifierCandidate] {
+        var seenTypeIDs: Set<String> = []
+        var seenLabels: Set<String> = []
+        var result: [MeetingTypeClassifierCandidate] = []
+        result.reserveCapacity(candidates.count)
+
+        for raw in candidates {
+            let typeId = raw.typeId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = raw.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typeId.isEmpty, !label.isEmpty else { continue }
+
+            let typeKey = typeId.lowercased()
+            let labelKey = label.lowercased()
+            guard seenTypeIDs.insert(typeKey).inserted else { continue }
+            guard seenLabels.insert(labelKey).inserted else { continue }
+
+            let signals = raw.strongSignals
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            result.append(
+                MeetingTypeClassifierCandidate(
+                    typeId: typeId,
+                    label: label,
+                    strongSignals: signals
+                )
+            )
+        }
+
+        return result
     }
 }

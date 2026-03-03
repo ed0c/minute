@@ -12,7 +12,8 @@ public struct MarkdownRenderer: Sendable {
         audioDurationSeconds: TimeInterval?,
         audioRelativePath: String?,
         transcriptRelativePath: String?,
-        participantFrontmatter: MeetingParticipantFrontmatter? = nil
+        participantFrontmatter: MeetingParticipantFrontmatter? = nil,
+        sectionVisibility: MeetingSummarySectionVisibility = .allEnabled
     ) -> String {
         let title = StringNormalizer.normalizeTitle(extraction.title)
         let date = noteDateTime
@@ -49,21 +50,29 @@ public struct MarkdownRenderer: Sendable {
         lines.append(StringNormalizer.normalizeParagraph(extraction.summary))
         lines.append("")
 
-        lines.append("## Decisions")
-        appendBullets(extraction.decisions, to: &lines)
-        lines.append("")
+        if sectionVisibility.decisions {
+            lines.append("## Decisions")
+            appendBullets(extraction.decisions, to: &lines)
+            lines.append("")
+        }
 
-        lines.append("## Action Items")
-        appendActionItems(extraction.actionItems, to: &lines)
-        lines.append("")
+        if sectionVisibility.actionItems {
+            lines.append("## Action Items")
+            appendActionItems(extraction.actionItems, to: &lines)
+            lines.append("")
+        }
 
-        lines.append("## Open Questions")
-        appendBullets(extraction.openQuestions, to: &lines)
-        lines.append("")
+        if sectionVisibility.openQuestions {
+            lines.append("## Open Questions")
+            appendBullets(extraction.openQuestions, to: &lines)
+            lines.append("")
+        }
 
-        lines.append("## Key Points")
-        appendBullets(extraction.keyPoints, to: &lines)
-        lines.append("")
+        if sectionVisibility.keyPoints {
+            lines.append("## Key Points")
+            appendBullets(extraction.keyPoints, to: &lines)
+            lines.append("")
+        }
 
         if let audioRelativePath {
             lines.append("## Audio")

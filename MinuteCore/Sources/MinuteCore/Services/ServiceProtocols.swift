@@ -163,13 +163,65 @@ public protocol SummarizationServicing: Sendable {
         outputLanguage: OutputLanguage
     ) async throws -> String
 
+    /// Returns raw JSON produced by the model, optionally using a pre-resolved prompt bundle.
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String
+
     /// Classifies the meeting type based on the transcript.
     func classify(
         transcript: String
     ) async throws -> MeetingType
 
+    /// Classifies to a dynamic candidate set (built-in + optional custom type labels).
+    /// Returns a stable type identifier and falls back to `fallbackTypeID` on uncertain output.
+    func classify(
+        transcript: String,
+        candidates: [MeetingTypeClassifierCandidate],
+        fallbackTypeID: String
+    ) async throws -> String
+
     /// Attempts to repair invalid JSON to match the schema.
     func repairJSON(_ invalidJSON: String) async throws -> String
+}
+
+public extension SummarizationServicing {
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String {
+        _ = resolvedPromptBundle
+        return try await summarize(
+            transcript: transcript,
+            meetingDate: meetingDate,
+            meetingType: meetingType,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    func classify(
+        transcript: String,
+        candidates: [MeetingTypeClassifierCandidate],
+        fallbackTypeID: String
+    ) async throws -> String {
+        _ = candidates
+        let resolved = try await classify(transcript: transcript)
+        let resolvedID = resolved.rawValue
+        if candidates.contains(where: { $0.typeId == resolvedID }) {
+            return resolvedID
+        }
+        return fallbackTypeID
+    }
 }
 
 public protocol ScreenContextInferencing: Sendable {
@@ -248,4 +300,22 @@ public protocol SessionVocabularyResolving: Sendable {
         sessionCustomInput: String,
         readiness: VocabularyReadinessStatus
     ) -> SessionVocabularyResolution
+}
+
+public protocol MeetingTypeLibraryStoring: Sendable {
+    func load() -> MeetingTypeLibrary
+    func save(_ library: MeetingTypeLibrary)
+    @discardableResult
+    func saveValidated(_ library: MeetingTypeLibrary) throws -> MeetingTypeLibrary
+    func clear()
+}
+
+public protocol ResolvedPromptBundleResolving: Sendable {
+    func resolvePromptBundle(
+        library: MeetingTypeLibrary,
+        selection: MeetingTypeSelection,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        autodetectResolvedTypeID: String?
+    ) throws -> ResolvedPromptBundle
 }

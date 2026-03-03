@@ -94,6 +94,75 @@ struct OutputContractCoverageTests {
         let files = try vaultFileRelativePaths(under: vaultRootURL)
         #expect(files.count == 3)
     }
+
+    @Test
+    func customPromptPath_stillProducesOnlyThreeVaultFiles() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let suite = "OutputContractCoverageTests.custom.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let libraryStore = MeetingTypeLibraryStore(defaults: defaults, libraryKey: "library")
+        let custom = try libraryStore.createCustomType(
+            displayName: "Customer Discovery",
+            promptComponents: PromptLibraryFixture.promptComponents(
+                objective: "Summarize discovery findings.",
+                summaryFocus: "Highlight customer pain points and owners."
+            )
+        )
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            summarizationJSON: validExtractionJSON(title: "Custom Prompt Path", date: "2025-01-14"),
+            repairJSON: validExtractionJSON(title: "Custom Prompt Path", date: "2025-01-14"),
+            meetingTypeLibraryStore: libraryStore
+        )
+
+        var context = try makePipelineContext(saveAudio: true, saveTranscript: true)
+        context.meetingTypeSelection = MeetingTypeSelection(selectionMode: .manual, selectedTypeId: custom.typeId)
+        context.meetingType = .general
+
+        _ = try await coordinator.execute(context: context)
+        let files = try vaultFileRelativePaths(under: vaultRootURL)
+        #expect(files.count == 3)
+    }
+
+    @Test
+    func builtInOverridePromptPath_stillProducesOnlyThreeVaultFiles() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let suite = "OutputContractCoverageTests.builtin.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let libraryStore = MeetingTypeLibraryStore(defaults: defaults, libraryKey: "library")
+        _ = try libraryStore.saveBuiltInOverride(
+            typeID: MeetingType.general.rawValue,
+            promptComponents: PromptLibraryFixture.promptComponents(
+                objective: "Override objective.",
+                summaryFocus: "Override focus."
+            )
+        )
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            summarizationJSON: validExtractionJSON(title: "Built-In Override Path", date: "2025-01-15"),
+            repairJSON: validExtractionJSON(title: "Built-In Override Path", date: "2025-01-15"),
+            meetingTypeLibraryStore: libraryStore
+        )
+
+        var context = try makePipelineContext(saveAudio: true, saveTranscript: true)
+        context.meetingTypeSelection = MeetingTypeSelection(
+            selectionMode: .manual,
+            selectedTypeId: MeetingType.general.rawValue
+        )
+        context.meetingType = .general
+
+        _ = try await coordinator.execute(context: context)
+        let files = try vaultFileRelativePaths(under: vaultRootURL)
+        #expect(files.count == 3)
+    }
 }
 
 private struct TestModelManager: ModelManaging {
@@ -193,7 +262,8 @@ private final class TestBookmarkStore: VaultBookmarkStoring {
 private func makeCoordinator(
     vaultRootURL: URL,
     summarizationJSON: String,
-    repairJSON: String
+    repairJSON: String,
+    meetingTypeLibraryStore: any MeetingTypeLibraryStoring = MeetingTypeLibraryStore()
 ) -> MeetingPipelineCoordinator {
     let bookmark = try? VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
     let store = TestBookmarkStore(bookmark: bookmark)
@@ -206,6 +276,7 @@ private func makeCoordinator(
             TestSummarizationService(summarizationJSON: summarizationJSON, repairJSON: repairJSON)
         },
         modelManager: TestModelManager(),
+        meetingTypeLibraryStore: meetingTypeLibraryStore,
         vaultAccess: access,
         vaultWriter: TestVaultWriter()
     )

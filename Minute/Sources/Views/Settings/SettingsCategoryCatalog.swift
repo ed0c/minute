@@ -7,6 +7,7 @@ struct SettingsCategoryDefinition: Identifiable, Hashable {
         case speakers
         case privacy
         case ai
+        case meetingTypes
         case updates
     }
 
@@ -68,6 +69,14 @@ enum SettingsCategoryCatalog {
                 iconName: "sparkles",
                 sortOrder: 50,
                 description: "Transcription, summarization, and local model status.",
+                isVisible: true
+            ),
+            SettingsCategoryDefinition(
+                id: .meetingTypes,
+                title: "Meeting Types",
+                iconName: "list.bullet.rectangle",
+                sortOrder: 55,
+                description: "Create and edit built-in and custom meeting prompts.",
                 isVisible: true
             ),
             SettingsCategoryDefinition(

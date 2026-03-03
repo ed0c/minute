@@ -1,5 +1,26 @@
 import Foundation
 
+public struct MeetingSummarySectionVisibility: Equatable, Sendable {
+    public var decisions: Bool
+    public var actionItems: Bool
+    public var openQuestions: Bool
+    public var keyPoints: Bool
+
+    public init(
+        decisions: Bool = true,
+        actionItems: Bool = true,
+        openQuestions: Bool = true,
+        keyPoints: Bool = true
+    ) {
+        self.decisions = decisions
+        self.actionItems = actionItems
+        self.openQuestions = openQuestions
+        self.keyPoints = keyPoints
+    }
+
+    public static let allEnabled = MeetingSummarySectionVisibility()
+}
+
 /// Fixed v1 schema produced by the summarization model.
 ///
 /// The model must output JSON only, matching this structure exactly.
@@ -18,10 +39,10 @@ public struct MeetingExtraction: Codable, Equatable, Sendable {
         title: String,
         date: String,
         summary: String,
-        decisions: [String],
-        actionItems: [ActionItem],
-        openQuestions: [String],
-        keyPoints: [String],
+        decisions: [String] = [],
+        actionItems: [ActionItem] = [],
+        openQuestions: [String] = [],
+        keyPoints: [String] = [],
         meetingType: MeetingType? = nil
     ) {
         self.title = title
@@ -43,6 +64,18 @@ public struct MeetingExtraction: Codable, Equatable, Sendable {
         case openQuestions = "open_questions"
         case keyPoints = "key_points"
         case meetingType = "meeting_type"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        date = try container.decode(String.self, forKey: .date)
+        summary = try container.decode(String.self, forKey: .summary)
+        decisions = try container.decodeIfPresent([String].self, forKey: .decisions) ?? []
+        actionItems = try container.decodeIfPresent([ActionItem].self, forKey: .actionItems) ?? []
+        openQuestions = try container.decodeIfPresent([String].self, forKey: .openQuestions) ?? []
+        keyPoints = try container.decodeIfPresent([String].self, forKey: .keyPoints) ?? []
+        meetingType = try container.decodeIfPresent(MeetingType.self, forKey: .meetingType)
     }
 }
 

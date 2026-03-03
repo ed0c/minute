@@ -28,6 +28,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let vocabularyBoostingUpdatedAtKey = "vocabularyBoostingUpdatedAt"
 
         public static let stageMeetingTypeKey = "stageMeetingType"
+        public static let stageMeetingTypeIDKey = "stageMeetingTypeID"
         public static let stageLanguageProcessingKey = "stageLanguageProcessing"
         public static let stageMicrophoneEnabledKey = "stageMicrophoneEnabled"
         public static let stageSystemAudioEnabledKey = "stageSystemAudioEnabled"
@@ -51,6 +52,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let defaultTranscriptionLanguage = TranscriptionLanguage.defaultSelection
 
         public static let defaultStageMeetingType = MeetingType.autodetect
+        public static let defaultStageMeetingTypeID = MeetingType.autodetect.rawValue
         public static let defaultStageLanguageProcessing = LanguageProcessingProfile.autoToEnglish
         public static let defaultStageMicrophoneEnabled = true
         public static let defaultStageSystemAudioEnabled = true

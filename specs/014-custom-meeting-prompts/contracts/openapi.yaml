@@ -1,0 +1,469 @@
+openapi: 3.0.3
+info:
+  title: Minute Meeting Prompt Library Contract (Abstract)
+  version: 0.1.0
+  description: |
+    This OpenAPI contract models app-internal boundaries for managing meeting
+    prompt definitions, classifier participation, and prompt resolution before
+    local inference. Minute is not exposed as a public HTTP API; endpoints
+    represent deterministic workflow contracts for planning and testing.
+
+servers:
+  - url: http://localhost
+
+paths:
+  /prompt-library/types:
+    get:
+      summary: List built-in and custom meeting types with effective prompt metadata
+      responses:
+        '200':
+          description: Meeting type library returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingTypeLibraryResponse'
+
+  /prompt-library/types/custom:
+    post:
+      summary: Create a custom meeting type with prompt components
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomMeetingTypeRequest'
+      responses:
+        '201':
+          description: Custom meeting type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingTypeDefinition'
+        '409':
+          description: Duplicate meeting type name
+        '422':
+          description: Prompt component validation failed
+
+  /prompt-library/types/custom/{typeId}:
+    patch:
+      summary: Update custom meeting type name, prompt components, or classifier profile
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomMeetingTypeRequest'
+      responses:
+        '200':
+          description: Custom meeting type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingTypeDefinition'
+        '404':
+          description: Custom meeting type not found
+        '409':
+          description: Duplicate meeting type name
+        '422':
+          description: Prompt component validation failed
+
+    delete:
+      summary: Delete a custom meeting type
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Custom meeting type deleted
+        '404':
+          description: Custom meeting type not found
+        '409':
+          description: Type is referenced by an in-progress processing selection
+
+  /prompt-library/types/built-in/{typeId}/override:
+    put:
+      summary: Save prompt component override for a built-in meeting type
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBuiltInOverrideRequest'
+      responses:
+        '200':
+          description: Built-in override saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuiltInPromptOverride'
+        '404':
+          description: Built-in type not found
+        '422':
+          description: Prompt component validation failed
+
+    delete:
+      summary: Restore built-in meeting type prompt to shipped default
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Built-in override removed and default restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuiltInPromptOverride'
+        '404':
+          description: Built-in type not found
+
+  /prompt-library/classifier/resolve:
+    post:
+      summary: Resolve meeting type for autodetect using enabled built-in and custom classifier profiles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassifierResolveRequest'
+      responses:
+        '200':
+          description: Resolved meeting type decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassifierResolveResponse'
+
+  /prompt-library/prompts/resolve:
+    post:
+      summary: Resolve final prompt bundle to be used for summarization inference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolvePromptBundleRequest'
+      responses:
+        '200':
+          description: Final prompt bundle for inference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedPromptBundle'
+        '412':
+          description: Selected type is unavailable and requires replacement
+
+  /pipeline/meeting-type/selection:
+    put:
+      summary: Persist current stage meeting type selection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetingTypeSelection'
+      responses:
+        '200':
+          description: Selection persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingTypeSelection'
+
+components:
+  schemas:
+    PromptComponentSet:
+      type: object
+      required:
+        - objective
+        - summaryFocus
+        - version
+      properties:
+        objective:
+          type: string
+          minLength: 1
+        summaryFocus:
+          type: string
+          minLength: 1
+        decisionRules:
+          type: string
+        actionItemRules:
+          type: string
+        openQuestionRules:
+          type: string
+        keyPointRules:
+          type: string
+        noiseFilterRules:
+          type: string
+        additionalGuidance:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+
+    ClassifierProfile:
+      type: object
+      required:
+        - label
+        - strongSignals
+      properties:
+        label:
+          type: string
+          minLength: 1
+        strongSignals:
+          type: array
+          items:
+            type: string
+        counterSignals:
+          type: array
+          items:
+            type: string
+        positiveExamples:
+          type: array
+          items:
+            type: string
+        negativeExamples:
+          type: array
+          items:
+            type: string
+
+    MeetingTypeDefinition:
+      type: object
+      required:
+        - typeId
+        - displayName
+        - source
+        - isDeletable
+        - isEditableName
+        - autodetectEligible
+        - promptComponents
+        - updatedAt
+        - status
+      properties:
+        typeId:
+          type: string
+        displayName:
+          type: string
+        source:
+          type: string
+          enum:
+            - built_in
+            - custom
+        isDeletable:
+          type: boolean
+        isEditableName:
+          type: boolean
+        autodetectEligible:
+          type: boolean
+        promptComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+        classifierProfile:
+          $ref: '#/components/schemas/ClassifierProfile'
+        updatedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - active
+            - archived
+            - deleted
+
+    BuiltInPromptOverride:
+      type: object
+      required:
+        - typeId
+        - defaultComponents
+        - overrideComponents
+        - isOverridden
+        - updatedAt
+      properties:
+        typeId:
+          type: string
+        defaultComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+        overrideComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+        isOverridden:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+
+    MeetingTypeLibraryResponse:
+      type: object
+      required:
+        - definitions
+        - defaultTypeId
+        - libraryVersion
+        - updatedAt
+      properties:
+        definitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeetingTypeDefinition'
+        defaultTypeId:
+          type: string
+        libraryVersion:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateCustomMeetingTypeRequest:
+      type: object
+      required:
+        - displayName
+        - promptComponents
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+        promptComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+        autodetectEligible:
+          type: boolean
+          default: false
+        classifierProfile:
+          $ref: '#/components/schemas/ClassifierProfile'
+
+    UpdateCustomMeetingTypeRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        promptComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+        autodetectEligible:
+          type: boolean
+        classifierProfile:
+          $ref: '#/components/schemas/ClassifierProfile'
+
+    UpdateBuiltInOverrideRequest:
+      type: object
+      required:
+        - promptComponents
+      properties:
+        promptComponents:
+          $ref: '#/components/schemas/PromptComponentSet'
+
+    MeetingTypeSelection:
+      type: object
+      required:
+        - selectionMode
+        - selectedTypeId
+      properties:
+        selectionMode:
+          type: string
+          enum:
+            - manual
+            - autodetect
+        selectedTypeId:
+          type: string
+        resolvedTypeId:
+          type: string
+        resolutionSource:
+          type: string
+          enum:
+            - manual
+            - classifier
+            - fallback_general
+
+    ClassifierResolveRequest:
+      type: object
+      required:
+        - transcriptSnippet
+        - candidateTypeIds
+      properties:
+        transcriptSnippet:
+          type: string
+          minLength: 1
+        candidateTypeIds:
+          type: array
+          items:
+            type: string
+
+    ClassifierResolveResponse:
+      type: object
+      required:
+        - resolvedTypeId
+        - resolutionSource
+        - fallbackApplied
+      properties:
+        resolvedTypeId:
+          type: string
+        resolutionSource:
+          type: string
+          enum:
+            - classifier
+            - fallback_general
+        fallbackApplied:
+          type: boolean
+        classifierRawOutput:
+          type: string
+
+    ResolvePromptBundleRequest:
+      type: object
+      required:
+        - meetingDateISO
+        - selection
+        - languageProcessingMode
+        - outputLanguage
+      properties:
+        meetingDateISO:
+          type: string
+          format: date
+        selection:
+          $ref: '#/components/schemas/MeetingTypeSelection'
+        languageProcessingMode:
+          type: string
+        outputLanguage:
+          type: string
+
+    ResolvedPromptBundle:
+      type: object
+      required:
+        - typeId
+        - typeDisplayName
+        - systemPrompt
+        - userPromptPreamble
+        - runtimeLanguageMode
+        - runtimeOutputLanguage
+        - sourceKind
+      properties:
+        typeId:
+          type: string
+        typeDisplayName:
+          type: string
+        systemPrompt:
+          type: string
+        userPromptPreamble:
+          type: string
+        runtimeLanguageMode:
+          type: string
+        runtimeOutputLanguage:
+          type: string
+        sourceKind:
+          type: string
+          enum:
+            - built_in_default
+            - built_in_override
+            - custom

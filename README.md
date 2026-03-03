@@ -41,8 +41,8 @@ brew install --cask minute
 ## Key Features
 
 ### Total Audio Capture
-* **System Audio & Mic Mixed:** Record your Zoom calls, Google Meets, or Discord chats directly. No virtual audio cables or "bot" participants required.
-* **Participant Memory:** Minute remembers people between meetings, so speaker names auto-resolve faster and your notes stay instantly familiar.
+* **System Audio & Mic Mixed:** Record your Teams calls, Google Meets, or Discord chats directly. No virtual audio cables or "bot" participants required.
+* **Participant Memory:** Minute can remember people between meetings, so speaker names auto-resolve faster and your notes stay instantly familiar.
 * **Process video:** Turn already recorded video files into summaries.
 
 ### Vision-Enhanced Context
@@ -56,6 +56,7 @@ brew install --cask minute
     * ✅ Clean Markdown headers and properties.
     * ✅ Links to the full transcript and audio for reference.
     * ✅ Capture up to 25 different languages.
+    * ✅ Create your own meeting types with custom summary instructions.
 
 ### 100% Private & Offline
 * **Apple Silicon Native:** Runs `Fluidaudio/Parakeet` (for transcription) and `Llama/Gemma 3` (for screen context and summarization) entirely on your Mac's Neural Engine.

@@ -282,6 +282,7 @@ struct SettingsCategoryCatalogCoverageTests {
         #expect(ids.contains(.speakers))
         #expect(ids.contains(.privacy))
         #expect(ids.contains(.ai))
+        #expect(ids.contains(.meetingTypes))
     }
 }
 

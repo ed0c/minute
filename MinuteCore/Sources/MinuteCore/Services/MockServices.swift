@@ -264,6 +264,61 @@ public struct MockSessionVocabularyResolver: SessionVocabularyResolving {
     }
 }
 
+public final class MockMeetingTypeLibraryStore: MeetingTypeLibraryStoring, @unchecked Sendable {
+    private var library: MeetingTypeLibrary
+
+    public init(library: MeetingTypeLibrary = .default) {
+        self.library = library
+    }
+
+    public func load() -> MeetingTypeLibrary {
+        library
+    }
+
+    public func save(_ library: MeetingTypeLibrary) {
+        self.library = library
+    }
+
+    @discardableResult
+    public func saveValidated(_ library: MeetingTypeLibrary) throws -> MeetingTypeLibrary {
+        let validated = try library.validated()
+        self.library = validated
+        return validated
+    }
+
+    public func clear() {
+        library = .default
+    }
+}
+
+public struct MockResolvedPromptBundleResolver: ResolvedPromptBundleResolving {
+    public var nextBundle: ResolvedPromptBundle?
+
+    public init(nextBundle: ResolvedPromptBundle? = nil) {
+        self.nextBundle = nextBundle
+    }
+
+    public func resolvePromptBundle(
+        library: MeetingTypeLibrary,
+        selection: MeetingTypeSelection,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        autodetectResolvedTypeID: String?
+    ) throws -> ResolvedPromptBundle {
+        if let nextBundle {
+            return nextBundle
+        }
+
+        return try ResolvedPromptBundleResolver().resolvePromptBundle(
+            library: library,
+            selection: selection,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage,
+            autodetectResolvedTypeID: autodetectResolvedTypeID
+        )
+    }
+}
+
 public actor MockSilenceAutoStopController: SilenceAutoStopControlling {
     public private(set) var snapshot = SilenceStatusSnapshot()
 
