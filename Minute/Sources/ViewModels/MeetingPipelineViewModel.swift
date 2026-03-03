@@ -349,13 +349,18 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
     }
 
-    private func saveStagePreferences() {
+    private func saveStagePreferences(
+        meetingTypeID: String? = nil,
+        languageProcessing: LanguageProcessingProfile? = nil,
+        microphoneEnabled: Bool? = nil,
+        systemAudioEnabled: Bool? = nil
+    ) {
         stagePreferencesStore.save(
             StagePreferences(
-                meetingTypeID: selectedMeetingTypeID,
-                languageProcessing: languageProcessing,
-                microphoneEnabled: microphoneCaptureEnabled,
-                systemAudioEnabled: systemAudioCaptureEnabled
+                meetingTypeID: meetingTypeID ?? selectedMeetingTypeID,
+                languageProcessing: languageProcessing ?? self.languageProcessing,
+                microphoneEnabled: microphoneEnabled ?? microphoneCaptureEnabled,
+                systemAudioEnabled: systemAudioEnabled ?? systemAudioCaptureEnabled
             )
         )
     }
@@ -372,10 +377,10 @@ final class MeetingPipelineViewModel: ObservableObject {
         $selectedMeetingTypeID
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] meetingTypeID in
                 guard let self else { return }
-                self.meetingType = MeetingType(rawValue: self.selectedMeetingTypeID) ?? .general
-                self.saveStagePreferences()
+                self.meetingType = MeetingType(rawValue: meetingTypeID) ?? .general
+                self.saveStagePreferences(meetingTypeID: meetingTypeID)
             }
             .store(in: &cancellables)
 
@@ -392,27 +397,26 @@ final class MeetingPipelineViewModel: ObservableObject {
             .store(in: &cancellables)
 
         $languageProcessing
-            .map(\.rawValue)
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.saveStagePreferences()
+            .sink { [weak self] languageProcessing in
+                self?.saveStagePreferences(languageProcessing: languageProcessing)
             }
             .store(in: &cancellables)
 
         $microphoneCaptureEnabled
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.saveStagePreferences()
+            .sink { [weak self] microphoneEnabled in
+                self?.saveStagePreferences(microphoneEnabled: microphoneEnabled)
             }
             .store(in: &cancellables)
 
         $systemAudioCaptureEnabled
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.saveStagePreferences()
+            .sink { [weak self] systemAudioEnabled in
+                self?.saveStagePreferences(systemAudioEnabled: systemAudioEnabled)
             }
             .store(in: &cancellables)
     }

@@ -128,6 +128,41 @@ struct MeetingPipelineViewModelLanguageProcessingTitleParityTests {
         #expect(model.autoToPickedLanguageOptionTitle == "English -> English (United States)")
     }
 
+    @Test
+    func selectedMeetingTypeID_persistsAcrossViewModelRelaunch() throws {
+        let suite = "MeetingPipelineViewModelLanguageProcessingTitleParityTests.meetingType.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(OutputLanguage.englishUS.rawValue, forKey: AppConfiguration.Defaults.outputLanguageKey)
+
+        let stageStore = StagePreferencesStore(defaults: defaults)
+        stageStore.clear()
+
+        let backendStore = TranscriptionBackendSelectionStore(defaults: defaults)
+        backendStore.setSelectedBackendID(TranscriptionBackend.whisper.rawValue)
+
+        let firstModel = try makeLanguageTitleModel(
+            defaults: defaults,
+            stagePreferencesStore: stageStore,
+            transcriptionBackendStore: backendStore
+        )
+
+        firstModel.selectedMeetingTypeID = MeetingType.planning.rawValue
+
+        let savedID = defaults.string(forKey: AppConfiguration.Defaults.stageMeetingTypeIDKey)
+        #expect(savedID == MeetingType.planning.rawValue)
+
+        let secondModel = try makeLanguageTitleModel(
+            defaults: defaults,
+            stagePreferencesStore: stageStore,
+            transcriptionBackendStore: backendStore
+        )
+
+        #expect(secondModel.selectedMeetingTypeID == MeetingType.planning.rawValue)
+    }
+
     private func makeLanguageTitleModel(
         defaults: UserDefaults,
         stagePreferencesStore: StagePreferencesStore,
