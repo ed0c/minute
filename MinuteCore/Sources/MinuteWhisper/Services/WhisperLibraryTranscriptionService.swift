@@ -214,24 +214,36 @@ public struct WhisperLibraryTranscriptionService: TranscriptionServicing {
                 return TranscriptionResult(text: normalized, segments: transcriptSegments)
             }
 
-            let selectedLanguage = configuration.languageOverride ?? languageStore.selectedLanguage()
-            var result = try runWhisper(
-                detectLanguage: selectedLanguage.detectLanguage,
-                language: selectedLanguage.whisperLanguageCode
+            let selectedLanguage = WhisperLanguageAttemptPlanner.effectiveLanguage(
+                languageOverride: configuration.languageOverride,
+                storedLanguage: languageStore.selectedLanguage()
             )
+            let attempts = WhisperLanguageAttemptPlanner.languageAttempts(selectedLanguage: selectedLanguage)
+            var finalResult: TranscriptionResult?
 
-            if result.text.isEmpty, selectedLanguage.detectLanguage {
-                result = try runWhisper(detectLanguage: false, language: "en")
+            for (index, attempt) in attempts.enumerated() {
+                let result = try runWhisper(detectLanguage: attempt.detectLanguage, language: attempt.languageCode)
+                if !result.text.isEmpty {
+                    return result
+                }
+                finalResult = result
+
+                if index < attempts.count - 1 {
+                    logger.info("Whisper returned empty transcript; retrying with English fallback.")
+                }
             }
 
-            if result.text.isEmpty {
+            if let finalResult, finalResult.text.isEmpty {
                 throw MinuteError.whisperFailed(
                     exitCode: 0,
                     output: "whisper returned empty transcript (duration=\(stats.durationSeconds)s peak=\(stats.peak) rms=\(stats.rms))."
                 )
             }
 
-            return result
+            throw MinuteError.whisperFailed(
+                exitCode: 0,
+                output: "whisper returned no result (duration=\(stats.durationSeconds)s peak=\(stats.peak) rms=\(stats.rms))."
+            )
         } onCancel: {
             cancellationBox.cancel()
         }

@@ -99,17 +99,27 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var vocabularyBoostingEnabledInSettings: Bool = false
     @Published private(set) var globalVocabularyTerms: [String] = []
     @Published private(set) var meetingTypeOptions: [MeetingTypeDefinition] = MeetingTypeLibrary.default.activeDefinitions
+    @Published private(set) var transcriptionInputLanguage: TranscriptionLanguage = .defaultSelection
     @Published var selectedMeetingTypeID: String = AppConfiguration.Defaults.defaultStageMeetingTypeID
     @Published var meetingType: MeetingType = .autodetect
     @Published var languageProcessing: LanguageProcessingProfile = .autoToEnglish
     @Published var outputLanguage: OutputLanguage = .defaultSelection
 
+    var transcriptionInputLanguageTitle: String {
+        switch transcriptionInputLanguage {
+        case .auto:
+            return "Auto"
+        default:
+            return transcriptionInputLanguage.displayName
+        }
+    }
+
     var autoToEnglishOptionTitle: String {
-        "Auto -> English"
+        "\(transcriptionInputLanguageTitle) -> English"
     }
 
     var autoToPickedLanguageOptionTitle: String {
-        "Auto -> \(outputLanguage.displayName)"
+        "\(transcriptionInputLanguageTitle) -> \(outputLanguage.displayName)"
     }
 
     var selectedLanguageProcessingTitle: String {
@@ -296,6 +306,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         loadStagePreferences()
 
         refreshVaultStatus()
+        refreshTranscriptionInputLanguageSetting()
         refreshOutputLanguageSetting()
         refreshTranscriptionBackendSetting()
         refreshVocabularySettings()
@@ -532,6 +543,11 @@ final class MeetingPipelineViewModel: ObservableObject {
         outputLanguage = OutputLanguage.resolved(from: rawValue)
     }
 
+    func refreshTranscriptionInputLanguageSetting() {
+        let rawValue = defaults.string(forKey: AppConfiguration.Defaults.transcriptionLanguageKey)
+        transcriptionInputLanguage = TranscriptionLanguage.resolved(from: rawValue)
+    }
+
     func refreshTranscriptionBackendSetting() {
         transcriptionBackend = transcriptionBackendStore.selectedBackend()
         if transcriptionBackend != .fluidAudio {
@@ -559,6 +575,9 @@ final class MeetingPipelineViewModel: ObservableObject {
         }
         if changed.requiresFullRefresh || changed.outputLanguageChanged {
             refreshOutputLanguageSetting()
+        }
+        if changed.requiresFullRefresh || changed.transcriptionLanguageChanged {
+            refreshTranscriptionInputLanguageSetting()
         }
         if changed.requiresFullRefresh || changed.transcriptionBackendChanged {
             refreshTranscriptionBackendSetting()
