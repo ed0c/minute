@@ -136,6 +136,12 @@ struct OnboardingView: View {
                 selection: $model.selectedSummarizationModelID
             )
 
+            SummarizationContextWindowPicker(
+                presets: model.summarizationContextWindowPresets,
+                recommendedPreset: model.recommendedSummarizationContextWindowPreset,
+                selection: $model.selectedSummarizationContextWindowPreset
+            )
+
             ModelDownloadStatusView(
                 title: "\(model.selectedTranscriptionBackendDisplayName) + Llama models",
                 detail: "Required for local transcription and summarization.",

@@ -50,6 +50,45 @@ struct MeetingPipelineCoordinatorAnalysisAudioTests {
     }
 
     @Test
+    func execute_whenNormalizeAnalysisAudioEnabled_reportsNormalizationProgressStage() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let normalizedURL = try makeTemporaryAudioFile(directoryPrefix: "minute-audio-normalized")
+        try Data([0xFF, 0xEE, 0xDD]).write(to: normalizedURL, options: [.atomic])
+        let transcription = CapturingTranscriptionService(result: TranscriptionResult(
+            text: "Hello.",
+            segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "Hello.")]
+        ))
+        let diarization = CapturingDiarizationService(segments: [])
+
+        let coordinator = makeCoordinator(
+            vaultRootURL: vaultRootURL,
+            diarizationService: diarization,
+            transcriptionService: transcription,
+            summarizationJSON: validExtractionJSON(title: "Weekly Sync", date: "2025-01-12"),
+            repairJSON: validExtractionJSON(title: "Weekly Sync", date: "2025-01-12"),
+            audioLoudnessNormalizer: RecordingAudioLoudnessNormalizer(normalizedURL: normalizedURL)
+        )
+
+        var context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        context.normalizeAnalysisAudio = true
+
+        let progressStore = AnalysisAudioProgressStore()
+        _ = try await coordinator.execute(
+            context: context,
+            progress: { update in
+                progressStore.record(update)
+            }
+        )
+
+        let snapshot = progressStore.snapshot()
+        #expect(
+            containsStagesInOrder(snapshot, expected: [.downloadingModels, .normalizingAudioLevels, .transcribing, .summarizing, .writing])
+        )
+    }
+
+    @Test
     func execute_whenNormalizeAnalysisAudioDisabled_doesNotInvokeNormalizer() async throws {
         let vaultRootURL = try makeTemporaryVault()
         defer { try? FileManager.default.removeItem(at: vaultRootURL) }
@@ -155,6 +194,34 @@ struct MeetingPipelineCoordinatorAnalysisAudioTests {
             #expect(FileManager.default.fileExists(atPath: audioURL.path))
         }
     }
+}
+
+private final class AnalysisAudioProgressStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stages: [PipelineStage] = []
+
+    func record(_ update: PipelineProgress) {
+        lock.lock()
+        stages.append(update.stage)
+        lock.unlock()
+    }
+
+    func snapshot() -> [PipelineStage] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stages
+    }
+}
+
+private func containsStagesInOrder(_ stages: [PipelineStage], expected: [PipelineStage]) -> Bool {
+    var index = stages.startIndex
+    for stage in expected {
+        guard let found = stages[index...].firstIndex(of: stage) else {
+            return false
+        }
+        index = stages.index(after: found)
+    }
+    return true
 }
 
 private struct TestModelManager: ModelManaging {

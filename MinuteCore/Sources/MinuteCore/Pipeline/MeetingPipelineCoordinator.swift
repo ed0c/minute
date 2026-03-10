@@ -9,13 +9,22 @@ public actor MeetingPipelineCoordinator {
     private let modelManager: any ModelManaging
     private let meetingTypeLibraryStore: any MeetingTypeLibraryStoring
     private let promptBundleResolver: any ResolvedPromptBundleResolving
+    private let checkpointStore: any SummarizationCheckpointStoring
+    private let runGate: any MeetingRunGating
     private let vaultAccess: VaultAccess
     private let vaultWriter: any VaultWriting
     private let speakerProfileStore: SpeakerProfileStore
     private let meetingSpeakerEmbeddingCache: MeetingSpeakerEmbeddingCache
+    private let summarizationPreflightConfigurationProvider: @Sendable () -> SummarizationPreflightConfiguration
     private let dateProvider: @Sendable () -> Date
 
     private let logger = Logger(subsystem: "roblibob.Minute", category: "pipeline")
+
+    private struct ResolvedOutputPaths: Sendable {
+        var noteRelativePath: String
+        var audioRelativePath: String?
+        var transcriptRelativePath: String?
+    }
 
     public init(
         transcriptionService: some TranscriptionServicing,
@@ -25,10 +34,13 @@ public actor MeetingPipelineCoordinator {
         modelManager: some ModelManaging,
         meetingTypeLibraryStore: any MeetingTypeLibraryStoring = MeetingTypeLibraryStore(),
         promptBundleResolver: any ResolvedPromptBundleResolving = ResolvedPromptBundleResolver(),
+        checkpointStore: any SummarizationCheckpointStoring = DefaultSummarizationCheckpointStore(),
+        runGate: any MeetingRunGating = SingleActiveMeetingRunGate(),
         vaultAccess: VaultAccess,
         vaultWriter: some VaultWriting,
         speakerProfileStore: SpeakerProfileStore = SpeakerProfileStore(),
         meetingSpeakerEmbeddingCache: MeetingSpeakerEmbeddingCache = MeetingSpeakerEmbeddingCache(),
+        summarizationPreflightConfigurationProvider: @escaping @Sendable () -> SummarizationPreflightConfiguration = { .default },
         dateProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.transcriptionService = transcriptionService
@@ -38,10 +50,13 @@ public actor MeetingPipelineCoordinator {
         self.modelManager = modelManager
         self.meetingTypeLibraryStore = meetingTypeLibraryStore
         self.promptBundleResolver = promptBundleResolver
+        self.checkpointStore = checkpointStore
+        self.runGate = runGate
         self.vaultAccess = vaultAccess
         self.vaultWriter = vaultWriter
         self.speakerProfileStore = speakerProfileStore
         self.meetingSpeakerEmbeddingCache = meetingSpeakerEmbeddingCache
+        self.summarizationPreflightConfigurationProvider = summarizationPreflightConfigurationProvider
         self.dateProvider = dateProvider
     }
 
@@ -49,9 +64,25 @@ public actor MeetingPipelineCoordinator {
         context: PipelineContext,
         progress: (@Sendable (PipelineProgress) -> Void)? = nil
     ) async throws -> PipelineResult {
+        let meetingRunID = makeMeetingRunID(context: context)
+        guard await runGate.beginIfPossible(meetingID: meetingRunID) else {
+            throw MinuteError.pipelineRunAlreadyActive
+        }
+        defer {
+            Task {
+                await runGate.end(meetingID: meetingRunID)
+            }
+        }
+
         do {
             var context = context
             try Task.checkCancellation()
+            let existingRunState: SummarizationRunState?
+            do {
+                existingRunState = try await checkpointStore.load(meetingID: meetingRunID)
+            } catch {
+                existingRunState = nil
+            }
             await attemptRecoverMissingContractAudioIfNeeded(context: context)
 
             progress?(.downloadingModels(fractionCompleted: 0))
@@ -61,21 +92,41 @@ public actor MeetingPipelineCoordinator {
             }
 
             try Task.checkCancellation()
-            progress?(.transcribing(fractionCompleted: 0.1))
 
             if context.normalizeAnalysisAudio {
+                progress?(.normalizingAudioLevels(fractionCompleted: 0.14))
+                let normalizationStartedAt = Date()
+                let inputName = context.audioTempURL.lastPathComponent
+                logger.info("Analysis audio normalization started [file=\(inputName, privacy: .public)]")
+                print("[Minute] Analysis audio normalization started: \(inputName)")
                 do {
                     let normalizedURL = try await audioLoudnessNormalizer.normalizeForAnalysis(
                         inputURL: context.audioTempURL,
                         workingDirectoryURL: context.workingDirectoryURL
                     )
                     context.analysisAudioURL = normalizedURL
+                    let elapsedSeconds = Date().timeIntervalSince(normalizationStartedAt)
+                    logger.info(
+                        "Analysis audio normalization finished [file=\(inputName, privacy: .public), normalizedFile=\(normalizedURL.lastPathComponent, privacy: .public), elapsedSeconds=\(elapsedSeconds, privacy: .public)]"
+                    )
+                    print(
+                        "[Minute] Analysis audio normalization finished in \(String(format: "%.1f", elapsedSeconds))s: \(normalizedURL.lastPathComponent)"
+                    )
                 } catch {
+                    let elapsedSeconds = Date().timeIntervalSince(normalizationStartedAt)
+                    logger.error(
+                        "Analysis audio normalization failed [file=\(inputName, privacy: .public), elapsedSeconds=\(elapsedSeconds, privacy: .public), error=\(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))]"
+                    )
+                    print(
+                        "[Minute] Analysis audio normalization failed after \(String(format: "%.1f", elapsedSeconds))s: \(ErrorHandler.userMessage(for: error, fallback: "Normalization failed."))"
+                    )
                     // Normalization is a quality improvement. If ffmpeg is missing or input audio is unreadable,
                     // proceed with the original analysis audio rather than failing the whole pipeline.
                     logger.error("Analysis audio normalization failed; proceeding without normalization: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
                 }
             }
+
+            progress?(.transcribing(fractionCompleted: context.normalizeAnalysisAudio ? 0.18 : 0.1))
 
             // Capture the canonical audio bytes early (analysis normalization must not affect vault output).
             // This also decouples the vault write from the temp-file lifetime across async boundaries.
@@ -127,10 +178,59 @@ public actor MeetingPipelineCoordinator {
                 screenEvents: context.screenContextEvents
             )
             let timelineText = MeetingTimelineRenderer().render(entries: timelineEntries)
+            let preflightConfiguration = summarizationPreflightConfigurationProvider()
+            let preflight = SummarizationPassPlanner.estimate(
+                transcript: timelineText,
+                contextWindowTokens: preflightConfiguration.contextWindowTokens,
+                reservedOutputTokens: preflightConfiguration.reservedOutputTokens,
+                safetyMarginTokens: preflightConfiguration.safetyMarginTokens,
+                promptOverheadTokens: preflightConfiguration.promptOverheadTokens
+            )
+            let chunks = SummarizationPassPlanner.chunkTranscript(
+                timelineText,
+                availableInputTokensPerPass: preflight.availableInputTokensPerPass
+            )
+            let runID = existingRunState?.runID ?? UUID().uuidString
+            var budgetEstimate = SummarizationTokenBudgetEstimate(
+                runID: runID,
+                modelID: context.meetingTypeSelection.selectedTypeId,
+                contextWindowTokens: preflight.contextWindowTokens,
+                reservedOutputTokens: preflight.reservedOutputTokens,
+                safetyMarginTokens: preflight.safetyMarginTokens,
+                promptOverheadTokens: preflight.promptOverheadTokens,
+                availableInputTokensPerPass: preflight.availableInputTokensPerPass,
+                estimatedTotalInputTokens: preflight.estimatedTotalInputTokens,
+                estimatedPassCount: preflight.estimatedPassCount
+            )
+            var chunkTexts = chunks
+            var passPlan = makePassPlan(runID: meetingRunID, chunks: chunks)
+            var passRecords = passPlan.chunks.map {
+                SummarizationPassRecord(passIndex: $0.passIndex, chunkID: $0.chunkID, status: .pending)
+            }
+            let completedPassCountFromCheckpoint = existingRunState?.lastValidCheckpoint?.completedPassIndex ?? 0
+            if completedPassCountFromCheckpoint > 0 {
+                passRecords = passRecords.map { record in
+                    guard record.passIndex <= completedPassCountFromCheckpoint else { return record }
+                    var updated = record
+                    updated.status = .completed
+                    return updated
+                }
+            }
+            let planningState = SummarizationRunState(
+                runID: runID,
+                meetingID: meetingRunID,
+                status: .planning,
+                currentPassIndex: 0,
+                totalPassCount: max(1, passPlan.chunks.count),
+                tokenBudgetEstimate: budgetEstimate,
+                passPlan: passPlan,
+                outputPaths: existingRunState?.outputPaths,
+                lastValidCheckpoint: existingRunState?.lastValidCheckpoint,
+                passRecords: passRecords
+            )
+            try? await checkpointStore.save(planningState, for: meetingRunID)
 
             try Task.checkCancellation()
-            progress?(.summarizing(fractionCompleted: 0.5))
-
             let summarizationService = summarizationServiceProvider()
             let meetingDate = context.startedAt
 
@@ -175,20 +275,256 @@ public actor MeetingPipelineCoordinator {
                 in: meetingTypeLibrary
             )
 
-            let rawJSON = try await summarizationService.summarize(
-                transcript: timelineText,
-                meetingDate: meetingDate,
-                meetingType: effectiveType,
-                languageProcessing: context.languageProcessing,
-                outputLanguage: context.outputLanguage,
-                resolvedPromptBundle: resolvedPromptBundle
+            if let runtimeAwareSummarizationService = summarizationService as? any RuntimeAwareSummarizationServicing {
+                let runtimePlan = try await runtimeAwareSummarizationService.makeRuntimePassPlan(
+                    transcript: timelineText,
+                    meetingDate: meetingDate,
+                    meetingType: effectiveType,
+                    languageProcessing: context.languageProcessing,
+                    outputLanguage: context.outputLanguage,
+                    resolvedPromptBundle: resolvedPromptBundle
+                )
+                chunkTexts = runtimePlan.chunks.map(\.transcript)
+                passPlan = makePassPlan(runID: meetingRunID, chunks: runtimePlan.chunks)
+                budgetEstimate = SummarizationTokenBudgetEstimate(
+                    runID: runID,
+                    modelID: context.meetingTypeSelection.selectedTypeId,
+                    contextWindowTokens: runtimePlan.contextWindowTokens,
+                    reservedOutputTokens: runtimePlan.reservedOutputTokens,
+                    safetyMarginTokens: runtimePlan.safetyMarginTokens,
+                    promptOverheadTokens: runtimePlan.promptOverheadTokens,
+                    availableInputTokensPerPass: runtimePlan.availableInputTokensPerPass,
+                    estimatedTotalInputTokens: runtimePlan.estimatedTotalInputTokens,
+                    estimatedPassCount: max(1, runtimePlan.chunks.count)
+                )
+                passRecords = passPlan.chunks.map {
+                    SummarizationPassRecord(passIndex: $0.passIndex, chunkID: $0.chunkID, status: .pending)
+                }
+                if completedPassCountFromCheckpoint > 0 {
+                    passRecords = passRecords.map { record in
+                        guard record.passIndex <= completedPassCountFromCheckpoint else { return record }
+                        var updated = record
+                        updated.status = .completed
+                        return updated
+                    }
+                }
+                let refinedPlanningState = SummarizationRunState(
+                    runID: runID,
+                    meetingID: meetingRunID,
+                    status: .planning,
+                    currentPassIndex: 0,
+                    totalPassCount: max(1, passPlan.chunks.count),
+                    tokenBudgetEstimate: budgetEstimate,
+                    passPlan: passPlan,
+                    outputPaths: existingRunState?.outputPaths,
+                    lastValidCheckpoint: existingRunState?.lastValidCheckpoint,
+                    passRecords: passRecords
+                )
+                try? await checkpointStore.save(refinedPlanningState, for: meetingRunID)
+            }
+
+            let totalPasses = max(1, passPlan.chunks.count)
+            let firstPendingPassIndex = completedPassCountFromCheckpoint + 1
+            let resumedFromPassIndex = firstPendingPassIndex > 1 ? firstPendingPassIndex : nil
+
+            progress?(
+                .summarizing(
+                    fractionCompleted: 0.5,
+                    preflightBudgetTokens: budgetEstimate.availableInputTokensPerPass,
+                    estimatedPassCount: budgetEstimate.estimatedPassCount,
+                    currentPassIndex: 0,
+                    totalPassCount: totalPasses,
+                    resumedFromPassIndex: resumedFromPassIndex
+                )
             )
-            var extraction = try await decodeOrRepairExtraction(
-                rawJSON: rawJSON,
-                meetingDate: meetingDate,
-                summarizationService: summarizationService
-            )
+
+            let processedDateTime = MeetingNoteDateFormatter.format(dateProvider())
+            var resolvedOutputPaths = resolvedOutputPaths(from: existingRunState?.outputPaths)
+            var mergeState = existingRunState.flatMap { decodeMergeState(from: $0.lastValidCheckpoint, recordingDate: meetingDate) }
+            var extraction = mergeState.map { SummarizationSummaryMerger.extraction(from: $0, recordingDate: meetingDate) }
+            var currentSummaryJSON = extraction.flatMap { try? encodeExtractionCanonical($0) }
+            var currentMergeStateJSON = mergeState.flatMap { try? encodeMergeStateCanonical($0) }
+            var lastValidCheckpoint = existingRunState?.lastValidCheckpoint
+
+            if firstPendingPassIndex <= totalPasses {
+                for passIndex in firstPendingPassIndex...totalPasses {
+                    try Task.checkCancellation()
+
+                    guard passPlan.chunks.contains(where: { $0.passIndex == passIndex }) else {
+                        throw MinuteError.llamaFailed(
+                            exitCode: -1,
+                            output: "Missing pass plan for pass \(passIndex)"
+                        )
+                    }
+
+                    passRecords = passRecords.map { record in
+                        guard record.passIndex == passIndex else { return record }
+                        var updated = record
+                        updated.status = .running
+                        updated.startedAt = dateProvider()
+                        return updated
+                    }
+                    let runningState = SummarizationRunState(
+                        runID: runID,
+                        meetingID: meetingRunID,
+                        status: .running,
+                        currentPassIndex: passIndex,
+                        totalPassCount: totalPasses,
+                        tokenBudgetEstimate: budgetEstimate,
+                        passPlan: passPlan,
+                        outputPaths: resolvedOutputPaths.map(makeOutputPaths),
+                        lastValidCheckpoint: lastValidCheckpoint,
+                        passRecords: passRecords
+                    )
+                    try? await checkpointStore.save(runningState, for: meetingRunID)
+
+                    let chunkIndex = max(0, min(chunkTexts.count - 1, passIndex - 1))
+                    let chunk = chunkTexts[chunkIndex]
+                    let rawJSON: String
+                    if let runtimeAwareSummarizationService = summarizationService as? any RuntimeAwareSummarizationServicing {
+                        rawJSON = try await runtimeAwareSummarizationService.summarizePass(
+                            transcriptChunk: chunk,
+                            previousSummaryJSON: currentMergeStateJSON,
+                            passIndex: passIndex,
+                            totalPasses: totalPasses,
+                            meetingDate: meetingDate,
+                            meetingType: effectiveType,
+                            languageProcessing: context.languageProcessing,
+                            outputLanguage: context.outputLanguage,
+                            resolvedPromptBundle: resolvedPromptBundle
+                        )
+                    } else {
+                        let passTranscript = makePassTranscript(
+                            previousSummaryJSON: currentMergeStateJSON,
+                            chunk: chunk,
+                            passIndex: passIndex,
+                            totalPasses: totalPasses
+                        )
+                        rawJSON = try await summarizationService.summarize(
+                            transcript: passTranscript,
+                            meetingDate: meetingDate,
+                            meetingType: effectiveType,
+                            languageProcessing: context.languageProcessing,
+                            outputLanguage: context.outputLanguage,
+                            resolvedPromptBundle: resolvedPromptBundle
+                        )
+                    }
+
+                    let passDelta = try await decodeOrRepairPassDelta(
+                        rawJSON: rawJSON,
+                        meetingDate: meetingDate,
+                        summarizationService: summarizationService
+                    )
+                    mergeState = SummarizationSummaryMerger.merge(
+                        previousState: mergeState,
+                        delta: passDelta,
+                        meetingType: effectiveType,
+                        recordingDate: meetingDate
+                    )
+                    guard let mergeState else {
+                        throw MinuteError.llamaFailed(
+                            exitCode: -1,
+                            output: "Unable to merge pass delta"
+                        )
+                    }
+                    extraction = SummarizationSummaryMerger.extraction(from: mergeState, recordingDate: meetingDate)
+                    guard let extraction else {
+                        throw MinuteError.llamaFailed(
+                            exitCode: -1,
+                            output: "Unable to materialize merged summary state"
+                        )
+                    }
+
+                    currentSummaryJSON = try encodeExtractionCanonical(extraction)
+                    currentMergeStateJSON = try encodeMergeStateCanonical(mergeState)
+                    let checkpoint = SummarizationSummaryCheckpoint(
+                        completedPassIndex: passIndex,
+                        summaryJSON: currentSummaryJSON ?? rawJSON,
+                        mergeStateJSON: currentMergeStateJSON,
+                        sourceChunkIDs: passPlan.chunks.prefix(passIndex).map(\.chunkID)
+                    )
+
+                    passRecords = passRecords.map { record in
+                        guard record.passIndex == passIndex else { return record }
+                        var updated = record
+                        updated.status = .completed
+                        updated.finishedAt = dateProvider()
+                        updated.errorCode = nil
+                        updated.errorMessage = nil
+                        return updated
+                    }
+
+                    if resolvedOutputPaths == nil {
+                        resolvedOutputPaths = try resolveStableOutputPaths(
+                            context: context,
+                            extraction: extraction
+                        )
+                    }
+                    if let resolvedOutputPaths {
+                        try writeSummaryNoteToVault(
+                            context: context,
+                            extraction: extraction,
+                            noteDateTime: processedDateTime,
+                            sectionVisibility: sectionVisibility,
+                            resolvedPaths: resolvedOutputPaths
+                        )
+                    }
+
+                    let passState = SummarizationRunState(
+                        runID: runID,
+                        meetingID: meetingRunID,
+                        status: .running,
+                        currentPassIndex: passIndex,
+                        totalPassCount: totalPasses,
+                        tokenBudgetEstimate: budgetEstimate,
+                        passPlan: passPlan,
+                        outputPaths: resolvedOutputPaths.map(makeOutputPaths),
+                        lastValidCheckpoint: checkpoint,
+                        passRecords: passRecords
+                    )
+                    try? await checkpointStore.save(passState, for: meetingRunID)
+                    lastValidCheckpoint = checkpoint
+
+                    let fraction = 0.5 + (0.34 * (Double(passIndex) / Double(totalPasses)))
+                    progress?(
+                        .summarizing(
+                            fractionCompleted: min(0.84, fraction),
+                            preflightBudgetTokens: budgetEstimate.availableInputTokensPerPass,
+                            estimatedPassCount: budgetEstimate.estimatedPassCount,
+                            currentPassIndex: passIndex,
+                            totalPassCount: totalPasses,
+                            resumedFromPassIndex: resumedFromPassIndex
+                        )
+                    )
+                }
+            }
+
+            guard var extraction else {
+                throw MinuteError.llamaFailed(
+                    exitCode: -1,
+                    output: "Missing final extraction after summarization passes"
+                )
+            }
             extraction.meetingType = effectiveType
+            let completedCheckpoint = SummarizationSummaryCheckpoint(
+                completedPassIndex: totalPasses,
+                summaryJSON: currentSummaryJSON ?? "",
+                mergeStateJSON: currentMergeStateJSON,
+                sourceChunkIDs: passPlan.chunks.map(\.chunkID)
+            )
+            let completedState = SummarizationRunState(
+                runID: runID,
+                meetingID: meetingRunID,
+                status: .completed,
+                currentPassIndex: totalPasses,
+                totalPassCount: totalPasses,
+                tokenBudgetEstimate: budgetEstimate,
+                passPlan: passPlan,
+                outputPaths: resolvedOutputPaths.map(makeOutputPaths),
+                lastValidCheckpoint: completedCheckpoint,
+                passRecords: passRecords
+            )
+            try? await checkpointStore.save(completedState, for: meetingRunID)
 
             try Task.checkCancellation()
             progress?(.writing(fractionCompleted: 0.85, extraction: extraction))
@@ -208,7 +544,8 @@ public actor MeetingPipelineCoordinator {
                 attributedSegments: attributedSegments,
                 originalAudioData: originalAudioData,
                 participantFrontmatter: participantFrontmatter,
-                sectionVisibility: sectionVisibility
+                sectionVisibility: sectionVisibility,
+                resolvedPathsOverride: resolvedOutputPaths
             )
 
             if let embeddingsBySpeakerID = suggestionResult?.embeddingsBySpeakerID, !embeddingsBySpeakerID.isEmpty {
@@ -221,12 +558,44 @@ public actor MeetingPipelineCoordinator {
             }
 
             cleanupTemporaryArtifacts(for: context)
+            await checkpointStore.clear(meetingID: meetingRunID)
             return outputs
         } catch is CancellationError {
             logger.info("Pipeline cancelled")
+            if let existing = try? await checkpointStore.load(meetingID: meetingRunID) {
+                var cancelledState = existing
+                cancelledState.status = .cancelled
+                cancelledState.passRecords = cancelledState.passRecords.map { record in
+                    guard record.status == .running else { return record }
+                    var updated = record
+                    updated.status = .cancelled
+                    updated.finishedAt = dateProvider()
+                    updated.errorCode = nil
+                    updated.errorMessage = nil
+                    return updated
+                }
+                try? await checkpointStore.save(cancelledState, for: meetingRunID)
+            }
             throw CancellationError()
         } catch {
             logger.error("Pipeline failed: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))")
+            if let existing = try? await checkpointStore.load(meetingID: meetingRunID) {
+                var failedState = existing
+                failedState.status = existing.lastValidCheckpoint == nil ? .failed : .pausedForRetry
+                failedState.passRecords = failedState.passRecords.map { record in
+                    if record.passIndex == existing.currentPassIndex,
+                       record.status == .running || record.status == .pending {
+                        var updated = record
+                        updated.status = .failed
+                        updated.finishedAt = dateProvider()
+                        updated.errorCode = "pipeline_failure"
+                        updated.errorMessage = ErrorHandler.userMessage(for: error, fallback: "Processing failed.")
+                        return updated
+                    }
+                    return record
+                }
+                try? await checkpointStore.save(failedState, for: meetingRunID)
+            }
             // Keep capture audio on failures so retry can reuse the same context safely.
             cleanupTemporaryArtifacts(for: context, policy: .workingDirectoryOnly)
             throw error
@@ -277,25 +646,24 @@ public actor MeetingPipelineCoordinator {
         return candidates
     }
 
-    private func decodeOrRepairExtraction(
+    private func decodeOrRepairPassDelta(
         rawJSON: String,
         meetingDate: Date,
         summarizationService: any SummarizationServicing
-    ) async throws -> MeetingExtraction {
+    ) async throws -> SummarizationPassDelta {
+        _ = meetingDate
         do {
-            let decoded = try decodeExtractionStrict(from: rawJSON)
-            return MeetingExtractionValidation.validated(decoded, recordingDate: meetingDate)
+            return try decodePassDeltaStrict(from: rawJSON)
         } catch {
-            logger.info("Extraction JSON invalid; attempting repair")
+            logger.info("Pass delta JSON invalid; attempting repair")
 
             let repaired = try await summarizationService.repairJSON(rawJSON)
 
             do {
-                let decoded = try decodeExtractionStrict(from: repaired)
-                return MeetingExtractionValidation.validated(decoded, recordingDate: meetingDate)
+                return try decodePassDeltaStrict(from: repaired)
             } catch {
-                logger.error("Extraction still invalid after repair; proceeding with fallback")
-                return MeetingExtractionValidation.fallback(recordingDate: meetingDate)
+                logger.error("Pass delta JSON still invalid after repair")
+                throw MinuteError.jsonInvalid
             }
         }
     }
@@ -315,6 +683,20 @@ public actor MeetingPipelineCoordinator {
         }
     }
 
+    private func decodePassDeltaStrict(from rawOutput: String) throws -> SummarizationPassDelta {
+        let trimmed = rawOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let extracted = JSONFirstObjectExtractor.extractFirstJSONObject(from: trimmed) else {
+            throw MinuteError.jsonInvalid
+        }
+
+        do {
+            return try JSONDecoder().decode(SummarizationPassDelta.self, from: Data(extracted.jsonObject.utf8))
+        } catch {
+            throw MinuteError.jsonInvalid
+        }
+    }
+
     private func writeOutputsToVault(
         context: PipelineContext,
         extraction: MeetingExtraction,
@@ -322,7 +704,8 @@ public actor MeetingPipelineCoordinator {
         attributedSegments: [AttributedTranscriptSegment],
         originalAudioData: Data?,
         participantFrontmatter: MeetingParticipantFrontmatter?,
-        sectionVisibility: MeetingSummarySectionVisibility
+        sectionVisibility: MeetingSummarySectionVisibility,
+        resolvedPathsOverride: ResolvedOutputPaths? = nil
     ) throws -> PipelineResult {
         let recordingDate = context.startedAt
         // Use extraction.date if parseable, otherwise fall back to the recording date.
@@ -350,7 +733,7 @@ public actor MeetingPipelineCoordinator {
         }
 
         return try vaultAccess.withVaultAccess { vaultRootURL in
-            let resolvedPaths = resolveOutputPaths(
+            let resolvedPaths = resolvedPathsOverride ?? resolveOutputPaths(
                 vaultRootURL: vaultRootURL,
                 noteRelativePath: noteRelativePath,
                 audioRelativePath: audioRelativePath,
@@ -402,7 +785,7 @@ public actor MeetingPipelineCoordinator {
         noteRelativePath: String,
         audioRelativePath: String?,
         transcriptRelativePath: String?
-    ) -> (noteRelativePath: String, audioRelativePath: String?, transcriptRelativePath: String?) {
+    ) -> ResolvedOutputPaths {
         let fileManager = FileManager.default
 
         func normalizeRelativePath(_ relativePath: String) -> String {
@@ -429,7 +812,11 @@ public actor MeetingPipelineCoordinator {
 
         // Fast path: no collision.
         if !exists(noteRelativePath) {
-            return (noteRelativePath, audioRelativePath, transcriptRelativePath)
+            return ResolvedOutputPaths(
+                noteRelativePath: noteRelativePath,
+                audioRelativePath: audioRelativePath,
+                transcriptRelativePath: transcriptRelativePath
+            )
         }
 
         // Collision: choose a stable, user-readable suffix.
@@ -440,12 +827,167 @@ public actor MeetingPipelineCoordinator {
             let candidateTranscript = transcriptRelativePath.map { withSuffix($0, suffix: suffix) }
 
             if !exists(candidateNote), !exists(candidateAudio), !exists(candidateTranscript) {
-                return (candidateNote, candidateAudio, candidateTranscript)
+                return ResolvedOutputPaths(
+                    noteRelativePath: candidateNote,
+                    audioRelativePath: candidateAudio,
+                    transcriptRelativePath: candidateTranscript
+                )
             }
         }
 
         // As a last resort, fall back to the original path (writer will overwrite or throw depending on implementation).
-        return (noteRelativePath, audioRelativePath, transcriptRelativePath)
+        return ResolvedOutputPaths(
+            noteRelativePath: noteRelativePath,
+            audioRelativePath: audioRelativePath,
+            transcriptRelativePath: transcriptRelativePath
+        )
+    }
+
+    private func resolveStableOutputPaths(
+        context: PipelineContext,
+        extraction: MeetingExtraction
+    ) throws -> ResolvedOutputPaths {
+        try vaultAccess.withVaultAccess { vaultRootURL in
+            let contract = MeetingFileContract(folders: context.vaultFolders)
+            let noteRelativePath = contract.noteRelativePath(date: context.startedAt, title: extraction.title)
+            let audioRelativePath = context.saveAudio ? contract.audioRelativePath(date: context.startedAt, title: extraction.title) : nil
+            let transcriptRelativePath = context.saveTranscript ? contract.transcriptRelativePath(date: context.startedAt, title: extraction.title) : nil
+            return resolveOutputPaths(
+                vaultRootURL: vaultRootURL,
+                noteRelativePath: noteRelativePath,
+                audioRelativePath: audioRelativePath,
+                transcriptRelativePath: transcriptRelativePath
+            )
+        }
+    }
+
+    private func resolvedOutputPaths(from paths: SummarizationOutputPaths?) -> ResolvedOutputPaths? {
+        guard let paths else { return nil }
+        return ResolvedOutputPaths(
+            noteRelativePath: paths.noteRelativePath,
+            audioRelativePath: paths.audioRelativePath,
+            transcriptRelativePath: paths.transcriptRelativePath
+        )
+    }
+
+    private func makeOutputPaths(_ paths: ResolvedOutputPaths) -> SummarizationOutputPaths {
+        SummarizationOutputPaths(
+            noteRelativePath: paths.noteRelativePath,
+            audioRelativePath: paths.audioRelativePath,
+            transcriptRelativePath: paths.transcriptRelativePath
+        )
+    }
+
+    private func writeSummaryNoteToVault(
+        context: PipelineContext,
+        extraction: MeetingExtraction,
+        noteDateTime: String,
+        sectionVisibility: MeetingSummarySectionVisibility,
+        resolvedPaths: ResolvedOutputPaths
+    ) throws {
+        let markdown = MarkdownRenderer().render(
+            extraction: extraction,
+            noteDateTime: noteDateTime,
+            audioDurationSeconds: context.audioDurationSeconds,
+            audioRelativePath: resolvedPaths.audioRelativePath,
+            transcriptRelativePath: resolvedPaths.transcriptRelativePath,
+            participantFrontmatter: nil,
+            sectionVisibility: sectionVisibility
+        )
+        let noteData = Data(markdown.utf8)
+        try vaultAccess.withVaultAccess { vaultRootURL in
+            let noteURL = vaultRootURL.appendingPathComponent(resolvedPaths.noteRelativePath)
+            try vaultWriter.writeAtomically(data: noteData, to: noteURL)
+        }
+    }
+
+    private func makePassTranscript(
+        previousSummaryJSON: String?,
+        chunk: String,
+        passIndex: Int,
+        totalPasses: Int
+    ) -> String {
+        let existingStateBlock: String
+        if let previousSummaryJSON, !previousSummaryJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            existingStateBlock = """
+            Existing accepted state:
+            \(previousSummaryJSON)
+
+            """
+        } else {
+            existingStateBlock = ""
+        }
+
+        return """
+        Process summarization pass \(passIndex) of \(totalPasses).
+        Use the existing accepted state only to avoid duplicates.
+        Return only net-new material from this chunk.
+
+        Return one valid JSON object with exactly these fields:
+        - title (string; empty string if unchanged)
+        - date (YYYY-MM-DD; empty string if unchanged)
+        - summary_points (array of short, high-signal new facts from this chunk only)
+        - decisions (array of new decisions only)
+        - action_items (array of objects with owner and task; new or materially refined items only)
+        - open_questions (array of new open questions only)
+        - key_points (array of new key points only)
+
+        Rules:
+        - Do not restate information already captured in the existing accepted state.
+        - Do not rewrite the full meeting summary.
+        - Use empty arrays when there is nothing new for a field.
+        - Do not output markdown fences or prose outside JSON.
+
+        \(existingStateBlock)Transcript chunk:
+        \(chunk)
+        """
+    }
+
+    private func decodeExtractionIfPossible(_ rawJSON: String, recordingDate: Date) -> MeetingExtraction? {
+        do {
+            let decoded = try decodeExtractionStrict(from: rawJSON)
+            return MeetingExtractionValidation.validated(decoded, recordingDate: recordingDate)
+        } catch {
+            return nil
+        }
+    }
+
+    private func encodeExtractionCanonical(_ extraction: MeetingExtraction) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(extraction)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw MinuteError.jsonInvalid
+        }
+        return json
+    }
+
+    private func encodeMergeStateCanonical(_ state: SummarizationMergeState) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(state)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw MinuteError.jsonInvalid
+        }
+        return json
+    }
+
+    private func decodeMergeState(
+        from checkpoint: SummarizationSummaryCheckpoint?,
+        recordingDate: Date
+    ) -> SummarizationMergeState? {
+        guard let checkpoint else { return nil }
+
+        if let mergeStateJSON = checkpoint.mergeStateJSON,
+           let data = mergeStateJSON.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(SummarizationMergeState.self, from: data) {
+            return decoded
+        }
+
+        guard let extraction = decodeExtractionIfPossible(checkpoint.summaryJSON, recordingDate: recordingDate) else {
+            return nil
+        }
+        return SummarizationMergeState(extraction: extraction)
     }
 
     private func summarySectionVisibility(
@@ -453,6 +995,41 @@ public actor MeetingPipelineCoordinator {
         in library: MeetingTypeLibrary
     ) -> MeetingSummarySectionVisibility {
         library.definition(for: typeID)?.promptComponents.summarySectionVisibility ?? .allEnabled
+    }
+
+    private func makeMeetingRunID(context: PipelineContext) -> String {
+        let seed = context.audioTempURL.standardizedFileURL.path + "|" + "\(Int(context.startedAt.timeIntervalSince1970))"
+        var hash: UInt64 = 5381
+        for byte in seed.utf8 {
+            hash = ((hash << 5) &+ hash) &+ UInt64(byte)
+        }
+        return "meeting-\(String(hash, radix: 16))"
+    }
+
+    private func makePassPlan(runID: String, chunks: [String]) -> SummarizationPassPlan {
+        let runtimeChunks = chunks.map {
+            SummarizationRuntimeChunk(
+                transcript: $0,
+                tokenCount: max(1, SummarizationPassPlanner.estimateTokens(in: $0))
+            )
+        }
+        return makePassPlan(runID: runID, chunks: runtimeChunks)
+    }
+
+    private func makePassPlan(runID: String, chunks: [SummarizationRuntimeChunk]) -> SummarizationPassPlan {
+        var tokenOffset = 0
+        let plans = chunks.enumerated().map { index, chunk -> SummarizationTranscriptChunkPlan in
+            let tokens = max(1, chunk.tokenCount)
+            defer { tokenOffset += tokens }
+            return SummarizationTranscriptChunkPlan(
+                chunkID: "chunk-\(index + 1)-\(tokenOffset)-\(tokenOffset + tokens)",
+                passIndex: index + 1,
+                tokenStart: tokenOffset,
+                tokenEnd: tokenOffset + tokens,
+                tokenCount: tokens
+            )
+        }
+        return SummarizationPassPlan(runID: runID, chunks: plans)
     }
 
     private func diarizeIfPossible(wavURL: URL, embeddingExportURL: URL?) async -> [SpeakerSegment] {

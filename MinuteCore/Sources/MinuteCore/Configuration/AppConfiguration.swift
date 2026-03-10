@@ -15,6 +15,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let screenContextVideoImportEnabledKey = "screenContextVideoImportEnabled"
         public static let screenContextCaptureIntervalSecondsKey = "screenContextCaptureIntervalSeconds"
         public static let summarizationModelIDKey = "summarizationModelID"
+        public static let summarizationContextWindowPresetKey = "summarizationContextWindowPreset"
         public static let transcriptionModelIDKey = "transcriptionModelID"
         public static let transcriptionBackendIDKey = "transcriptionBackendID"
         public static let fluidAudioAsrModelIDKey = "fluidAudioAsrModelID"
@@ -45,6 +46,7 @@ public struct AppConfiguration: Sendable, Equatable {
         public static let defaultMicActivityNotificationsEnabled = true
         public static let defaultKnownSpeakerSuggestionsEnabled = false
         public static let defaultOutputLanguage = OutputLanguage.defaultSelection
+        public static let defaultSummarizationContextWindowPreset = SummarizationContextWindowPreset.balanced
         public static let defaultTranscriptionBackendID = TranscriptionBackend.whisper.rawValue
         public static let defaultFluidAudioAsrModelID = FluidAudioASRModelCatalog.defaultModelID
         public static let defaultVocabularyBoostingEnabled = false

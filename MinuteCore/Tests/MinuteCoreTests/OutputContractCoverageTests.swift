@@ -321,13 +321,13 @@ private func makeTemporaryAudioFile() throws -> URL {
 private func validExtractionJSON(title: String, date: String) -> String {
     #"""
     {
-      \"title\": \"\#(title)\",
-      \"date\": \"\#(date)\",
-      \"summary\": \"Summary\",
-      \"decisions\": [],
-      \"action_items\": [],
-      \"open_questions\": [],
-      \"key_points\": []
+      "title": "\#(title)",
+      "date": "\#(date)",
+      "summary": "Summary",
+      "decisions": [],
+      "action_items": [],
+      "open_questions": [],
+      "key_points": []
     }
     """#
 }

@@ -28,6 +28,12 @@ final class OnboardingViewModel: ObservableObject {
             modelLifecycleController.refresh()
         }
     }
+    @Published var selectedSummarizationContextWindowPreset: SummarizationContextWindowPreset {
+        didSet {
+            guard oldValue != selectedSummarizationContextWindowPreset else { return }
+            summarizationContextWindowStore.setSelectedPreset(selectedSummarizationContextWindowPreset)
+        }
+    }
     @Published var selectedTranscriptionBackendID: String {
         didSet {
             guard oldValue != selectedTranscriptionBackendID else { return }
@@ -52,6 +58,7 @@ final class OnboardingViewModel: ObservableObject {
 
     private let defaults: UserDefaults
     private let summarizationModelStore: SummarizationModelSelectionStore
+    private let summarizationContextWindowStore: SummarizationContextWindowSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
@@ -72,11 +79,13 @@ final class OnboardingViewModel: ObservableObject {
         modelManager: (any ModelManaging)? = nil,
         defaults: UserDefaults = .standard,
         summarizationModelStore: SummarizationModelSelectionStore? = nil,
+        summarizationContextWindowStore: SummarizationContextWindowSelectionStore? = nil,
         transcriptionModelStore: TranscriptionModelSelectionStore? = nil,
         transcriptionBackendStore: TranscriptionBackendSelectionStore? = nil,
         fluidAudioModelStore: FluidAudioASRModelSelectionStore? = nil
     ) {
         let store = summarizationModelStore ?? SummarizationModelSelectionStore(defaults: defaults)
+        let contextStore = summarizationContextWindowStore ?? SummarizationContextWindowSelectionStore(defaults: defaults)
         let transcriptionStore = transcriptionModelStore ?? TranscriptionModelSelectionStore(defaults: defaults)
         let backendStore = transcriptionBackendStore ?? TranscriptionBackendSelectionStore(defaults: defaults)
         let fluidStore = fluidAudioModelStore ?? FluidAudioASRModelSelectionStore(defaults: defaults)
@@ -88,6 +97,7 @@ final class OnboardingViewModel: ObservableObject {
         )
         self.defaults = defaults
         self.summarizationModelStore = store
+        self.summarizationContextWindowStore = contextStore
         self.transcriptionModelStore = transcriptionStore
         self.transcriptionBackendStore = backendStore
         self.fluidAudioModelStore = fluidStore
@@ -100,6 +110,7 @@ final class OnboardingViewModel: ObservableObject {
         if store.selectedModelID() != selectedModel.id {
             store.setSelectedModelID(selectedModel.id)
         }
+        self.selectedSummarizationContextWindowPreset = contextStore.selectedPreset()
         let selectedBackend = backendStore.selectedBackend()
         self.selectedTranscriptionBackendID = selectedBackend.id
         if backendStore.selectedBackendID() != selectedBackend.id {
@@ -163,6 +174,14 @@ final class OnboardingViewModel: ObservableObject {
 
     var summarizationModels: [SummarizationModel] {
         SummarizationModelCatalog.all
+    }
+
+    var summarizationContextWindowPresets: [SummarizationContextWindowPreset] {
+        SummarizationContextWindowPreset.allCases
+    }
+
+    var recommendedSummarizationContextWindowPreset: SummarizationContextWindowPreset {
+        summarizationContextWindowStore.recommendedPreset()
     }
 
     var transcriptionBackends: [TranscriptionBackend] {

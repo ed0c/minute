@@ -24,6 +24,10 @@ struct PipelineCriticalPathCoverageTests {
         expectEqual(transcribing.stage, .transcribing)
         expectEqual(transcribing.fractionCompleted, 0.4)
 
+        let normalizing = PipelineProgress.normalizingAudioLevels(fractionCompleted: 0.2)
+        expectEqual(normalizing.stage, .normalizingAudioLevels)
+        expectEqual(normalizing.fractionCompleted, 0.2)
+
         let summarizing = PipelineProgress.summarizing(fractionCompleted: 0.7)
         expectEqual(summarizing.stage, .summarizing)
         expectEqual(summarizing.fractionCompleted, 0.7)

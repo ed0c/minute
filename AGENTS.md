@@ -81,17 +81,10 @@ Comment Only What the Code Cannot Say
 - Do not log raw transcripts by default.
 - Transcript is written to the vault as its own Markdown file (not embedded into the meeting note body).
 
-## Audio conversion policy
-- Capture with AVFoundation.
-- Prefer an `ffmpeg` conversion step to guarantee mono 16 kHz 16-bit PCM WAV output.
-- Always verify the resulting WAV format.
-
 ## Whisper/Llama integration policy
 Preference order:
 1. Library integration (preferred): link whisper/llama as libraries via SPM/CMake/XCFramework and call from Swift via a small C shim.
 2. Executable integration (fallback): bundle CLI binaries and invoke via `Process`.
-
-Be pragmatic: ship v1 reliably even if the fallback path is required.
 
 ## Testing
 ### Unit tests (required)
@@ -104,9 +97,6 @@ Add tests in `MinuteCore` for:
 
 ### Integration tests (recommended)
 - Mock the process runner (or library wrapper) to test whisper/llama output handling.
-
-### Manual QA (required before release)
-Use the checklist in `docs/tasks/10-packaging-sandbox-signing-and-qa.md`.
 
 ## Linting and formatting
 This repo currently has no enforced linter/formatter configuration committed.
@@ -147,18 +137,5 @@ If CI is added, prefer using `xcodebuild` so it matches local behavior.
   - Follow `docs/releasing.md` for notarization, appcast, and Homebrew updates
 
 ## Active Technologies
-- Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, MinuteCore, (001-swift-testing-refactor)
-- Files (Obsidian vault output, app support directories) (001-swift-testing-refactor)
-- Swift 5.9 (Xcode 15.x) + SwiftUI, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore (010-silence-auto-stop)
-- Local files only (existing vault outputs and temporary recording session directory), plus session-scoped event history in memory for stop rationale (010-silence-auto-stop)
-- Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components (011-vocabulary-boosting)
-- Local app settings persistence for global vocabulary config + session-scoped in-memory override state; no new vault output files (011-vocabulary-boosting)
-- Swift (SwiftUI app target, Swift package modules) + SwiftUI, AppKit, Combine, MinuteCore, existing settings view models/services (012-settings-improvements)
-- Existing local settings persistence (`UserDefaults` + local file-backed app state where already used); no new storage systems (012-settings-improvements)
-- Swift 5.9+ (Xcode 15.x), Swift tools 6.2 for `MinuteCore` package + SwiftUI, Combine, AVFoundation, ScreenCaptureKit, UserNotifications, MinuteCore package modules (013-simplify-architecture)
-- Local files (vault outputs and temporary session artifacts) + local preferences in `UserDefaults` (013-simplify-architecture)
-- Swift 5.9+ (Xcode 15.x), Swift tools 6.2 (`MinuteCore`) + SwiftUI, Combine, MinuteCore pipeline/services, MinuteLlama summarization service, existing UserDefaults-backed settings stores (014-custom-meeting-prompts)
-- Local-only persistence via `UserDefaults` (+ optional local JSON snapshot for prompt library migrations if needed); existing vault outputs remain unchanged (014-custom-meeting-prompts)
-
-## Recent Changes
-- 011-vocabulary-boosting: Added Swift (SwiftUI app target + Swift tools 6.2 package) + SwiftUI, MinuteCore, FluidAudio, OSLog, existing model manager/status components
+- Swift 5.9+ (Xcode 15.x), Swift tools 6.2 for `MinuteCore` package + SwiftUI, Combine, MinuteCore pipeline/services, MinuteLlama summarization service, OSLog (015-token-budget-multipass-summary)
+- Local files (vault outputs and temporary session artifacts) + local preferences in `UserDefaults` where already used (015-token-budget-multipass-summary)

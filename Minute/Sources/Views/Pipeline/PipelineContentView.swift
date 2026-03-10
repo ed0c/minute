@@ -280,7 +280,7 @@ struct PipelineContentView: View {
         case .recording:
             return "Recording"
         case .processing, .writing, .importing:
-            return model.state.statusLabel
+            return model.currentStatusLabel
         case .recorded:
             return "Ready to Process"
         case .failed:
@@ -332,8 +332,10 @@ struct PipelineContentView: View {
                 backgroundProcessingSnapshot: model.backgroundProcessingSnapshot,
                 isFirstScreenInferenceDeferred: model.screenInferenceStatus?.isFirstInferenceDeferred == true,
                 progress: model.progress,
+                statusLabelOverride: model.statusLabelOverride,
                 recoverableRecordings: model.recoverableRecordings,
-                recordingWarningDetail: recordingWarningDetailText()
+                recordingWarningDetail: recordingWarningDetailText(),
+                summarizationProgressDetail: model.summarizationProgressDetail
             ),
             dismissedStatusDrawerID: dismissedStatusDrawerID
         ) else {

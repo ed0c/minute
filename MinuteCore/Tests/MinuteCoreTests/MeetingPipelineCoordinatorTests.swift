@@ -49,26 +49,35 @@ struct MeetingPipelineCoordinatorTests {
     }
 
     @Test
-    func execute_invalidJSON_usesFallbackExtraction() async throws {
+    func execute_invalidJSON_failsWithoutWritingFallbackNote() async throws {
         let vaultRootURL = try makeTemporaryVault()
         defer { try? FileManager.default.removeItem(at: vaultRootURL) }
 
         let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
-        let processedAt = Date(timeIntervalSince1970: 1_701_111_111)
-        let coordinator = makeCoordinator(
+        let checkpointStore = RecordingCheckpointStore()
+        let coordinator = makeRecoveryCoordinator(
             vaultRootURL: vaultRootURL,
-            summarizationJSON: "not json",
-            repairJSON: "still not json",
-            dateProvider: { processedAt }
+            transcriptionService: TestTranscriptionService(
+                result: TranscriptionResult(
+                    text: "invalid output transcript",
+                    segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "invalid output transcript")]
+                )
+            ),
+            summarizationServiceProvider: {
+                TestSummarizationService(summarizationJSON: "not json", repairJSON: "still not json")
+            },
+            checkpointStore: checkpointStore
         )
 
-        let result = try await coordinator.execute(context: context)
+        do {
+            _ = try await coordinator.execute(context: context)
+            Issue.record("Expected invalid pass JSON failure")
+        } catch {
+            #expect(error is MinuteError)
+        }
 
-        #expect(result.noteURL.lastPathComponent.contains("Untitled"))
-        #expect(result.audioURL == nil)
-
-        let noteContents = try String(contentsOf: result.noteURL)
-        #expect(noteContents.contains("Failed to structure output"))
+        let writtenPaths = try FileManager.default.subpathsOfDirectory(atPath: vaultRootURL.path)
+        #expect(writtenPaths.isEmpty)
     }
 
     @Test
@@ -165,6 +174,290 @@ struct MeetingPipelineCoordinatorTests {
         let noteBContents = try String(contentsOf: resultB.noteURL)
         #expect(noteBContents.contains(audioBRelativePath))
         #expect(noteBContents.contains(transcriptBRelativePath))
+    }
+
+    @Test
+    func execute_runtimeAwareSummarizerRefinesPassPlanAndUsesSummarizePass() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let runtimeService = RuntimeAwareScriptedSummarizationService(
+            plan: SummarizationRuntimePassPlan(
+                contextWindowTokens: 8192,
+                reservedOutputTokens: 512,
+                safetyMarginTokens: 256,
+                promptOverheadTokens: 640,
+                availableInputTokensPerPass: 6784,
+                estimatedTotalInputTokens: 1024,
+                chunks: [
+                    SummarizationRuntimeChunk(transcript: "refined chunk 1", tokenCount: 300),
+                    SummarizationRuntimeChunk(transcript: "refined chunk 2", tokenCount: 280),
+                    SummarizationRuntimeChunk(transcript: "refined chunk 3", tokenCount: 260),
+                ]
+            ),
+            passOutputs: [
+                validExtractionJSON(title: "Runtime Pass 1", date: "2025-01-12", summary: "First refined pass"),
+                validExtractionJSON(title: "Runtime Pass 2", date: "2025-01-12", summary: "Second refined pass"),
+                validExtractionJSON(title: "Runtime Pass 3", date: "2025-01-12", summary: "Third refined pass"),
+            ]
+        )
+        let coordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: TestTranscriptionService(
+                result: TranscriptionResult(
+                    text: "tiny transcript",
+                    segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "tiny transcript")]
+                )
+            ),
+            summarizationServiceProvider: { runtimeService },
+            checkpointStore: RecordingCheckpointStore()
+        )
+
+        _ = try await coordinator.execute(context: context)
+
+        let summarizeCallCount = await runtimeService.summarizeCallCount()
+        let passChunks = await runtimeService.recordedPassChunks()
+
+        #expect(summarizeCallCount == 0)
+        #expect(passChunks == ["refined chunk 1", "refined chunk 2", "refined chunk 3"])
+    }
+
+    @Test
+    func execute_preflightUsesConfiguredContextWindow() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let repeatedText = "Transcript " + String(repeating: "chunk ", count: 600)
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let checkpointStore = RecordingCheckpointStore()
+        let coordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: TestTranscriptionService(
+                result: TranscriptionResult(
+                    text: repeatedText,
+                    segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: repeatedText)]
+                )
+            ),
+            summarizationServiceProvider: {
+                TestSummarizationService(
+                    summarizationJSON: validExtractionJSON(title: "Budgeted", date: "2025-01-12"),
+                    repairJSON: validExtractionJSON(title: "Budgeted", date: "2025-01-12")
+                )
+            },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: SummarizationPreflightConfiguration(
+                contextWindowTokens: 32_768,
+                reservedOutputTokens: 1_024
+            )
+        )
+
+        _ = try await coordinator.execute(context: context)
+
+        let meetingID = makeMeetingRunID(for: context)
+        let finalState = await checkpointStore.lastSavedState(meetingID: meetingID)
+
+        #expect(finalState?.tokenBudgetEstimate?.contextWindowTokens == 32_768)
+        #expect(finalState?.tokenBudgetEstimate?.availableInputTokensPerPass == 30_976)
+    }
+
+    @Test
+    func execute_failedPassPreservesLastValidCheckpointAndSummaryDocument() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let checkpointStore = RecordingCheckpointStore()
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let summarizationService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "First pass summary")),
+                .fail("synthetic-pass-failure"),
+            ]
+        )
+        let coordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: TestTranscriptionService(result: makeLongTranscriptionResult()),
+            summarizationServiceProvider: { summarizationService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        do {
+            _ = try await coordinator.execute(context: context)
+            Issue.record("Expected synthetic summarization failure")
+        } catch {
+            // Expected failure path.
+        }
+
+        let meetingRunID = makeMeetingRunID(for: context)
+        let loadedState = try await checkpointStore.load(meetingID: meetingRunID)
+        let state = try #require(loadedState)
+        let outputPaths = try #require(state.outputPaths)
+
+        #expect(state.status == .pausedForRetry)
+        #expect(state.lastValidCheckpoint?.completedPassIndex == 1)
+        #expect(state.passRecords.first(where: { $0.passIndex == 2 })?.status == .failed)
+        #expect(state.passRecords.contains(where: { $0.passIndex > 2 && $0.status == .pending }))
+
+        let noteURL = vaultRootURL.appendingPathComponent(outputPaths.noteRelativePath)
+        let noteContents = try String(contentsOf: noteURL)
+        #expect(noteContents.contains("First pass summary"))
+        #expect(!noteContents.contains("Second pass summary"))
+    }
+
+    @Test
+    func execute_resumeAfterRestartContinuesFromLastCheckpointWithoutDuplicatingNotePath() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let checkpointStore = RecordingCheckpointStore()
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let twoPassTranscription = TestTranscriptionService(result: makeLongTranscriptionResult(segmentCount: 120))
+        let initialService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "First pass summary")),
+                .fail("synthetic-pass-failure"),
+            ]
+        )
+        let initialCoordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: twoPassTranscription,
+            summarizationServiceProvider: { initialService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        do {
+            _ = try await initialCoordinator.execute(context: context)
+            Issue.record("Expected synthetic summarization failure")
+        } catch {
+            // Expected failure path.
+        }
+
+        let meetingRunID = makeMeetingRunID(for: context)
+        let loadedPausedState = try await checkpointStore.load(meetingID: meetingRunID)
+        let pausedState = try #require(loadedPausedState)
+        let pausedOutputPaths = try #require(pausedState.outputPaths)
+
+        let resumedService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "Second pass summary")),
+            ]
+        )
+        let resumedCoordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: twoPassTranscription,
+            summarizationServiceProvider: { resumedService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        let result = try await resumedCoordinator.execute(context: context)
+        let recordedTranscripts = await resumedService.recordedTranscripts()
+        let noteContents = try String(contentsOf: result.noteURL)
+        let remainingState = try await checkpointStore.load(meetingID: meetingRunID)
+
+        #expect(canonicalFileURL(result.noteURL) == canonicalFileURL(vaultRootURL.appendingPathComponent(pausedOutputPaths.noteRelativePath)))
+        #expect(recordedTranscripts.count >= 1)
+        #expect(recordedTranscripts[0].contains("First pass summary"))
+        #expect(noteContents.contains("First pass summary"))
+        #expect(noteContents.contains("Second pass summary"))
+        #expect(remainingState == nil)
+    }
+
+    @Test
+    func execute_cancelDuringLaterPassPreservesLatestCheckpoint() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let checkpointStore = RecordingCheckpointStore()
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let twoPassTranscription = TestTranscriptionService(result: makeLongTranscriptionResult(segmentCount: 120))
+        let summarizationService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "First pass summary")),
+                .blockUntilCancelled,
+            ]
+        )
+        let coordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: twoPassTranscription,
+            summarizationServiceProvider: { summarizationService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        let execution = Task {
+            try await coordinator.execute(context: context)
+        }
+
+        try await summarizationService.waitUntilCallCount(2)
+        execution.cancel()
+
+        do {
+            _ = try await execution.value
+            Issue.record("Expected cancellation")
+        } catch is CancellationError {
+            // Expected cancellation path.
+        } catch {
+            Issue.record("Expected CancellationError, received: \(error)")
+        }
+
+        let meetingRunID = makeMeetingRunID(for: context)
+        let loadedState = try await checkpointStore.load(meetingID: meetingRunID)
+        let state = try #require(loadedState)
+
+        #expect(state.status == .cancelled)
+        #expect(state.lastValidCheckpoint?.completedPassIndex == 1)
+        #expect(state.passRecords.first(where: { $0.passIndex == 2 })?.status == .cancelled)
+    }
+
+    @Test
+    func execute_resumeTransitionsStatusFromPausedForRetryBackToRunning() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let checkpointStore = RecordingCheckpointStore()
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let twoPassTranscription = TestTranscriptionService(result: makeLongTranscriptionResult(segmentCount: 120))
+        let failingService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "First pass summary")),
+                .fail("synthetic-pass-failure"),
+            ]
+        )
+        let failingCoordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: twoPassTranscription,
+            summarizationServiceProvider: { failingService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        do {
+            _ = try await failingCoordinator.execute(context: context)
+            Issue.record("Expected synthetic summarization failure")
+        } catch {
+            // Expected failure path.
+        }
+
+        let resumedService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "Second pass summary")),
+            ]
+        )
+        let resumedCoordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: twoPassTranscription,
+            summarizationServiceProvider: { resumedService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        _ = try await resumedCoordinator.execute(context: context)
+
+        let statuses = await checkpointStore.savedStatuses(meetingID: makeMeetingRunID(for: context))
+        #expect(statusesContainInOrder(statuses, sequence: [.running, .pausedForRetry, .running]))
     }
 }
 
@@ -361,12 +654,12 @@ private func makeTemporaryAudioFile() throws -> URL {
     return fileURL
 }
 
-private func validExtractionJSON(title: String, date: String) -> String {
+private func validExtractionJSON(title: String, date: String, summary: String = "Summary") -> String {
     return #"""
     {
       "title": "\#(title)",
       "date": "\#(date)",
-      "summary": "Summary",
+      "summary": "\#(summary)",
       "decisions": [],
       "action_items": [],
       "open_questions": [],
@@ -384,4 +677,278 @@ private func stages(_ stages: [PipelineStage], containInOrder expected: [Pipelin
         index = stages.index(after: found)
     }
     return true
+}
+
+private func makeRecoveryCoordinator(
+    vaultRootURL: URL,
+    transcriptionService: some TranscriptionServicing,
+    summarizationServiceProvider: @escaping @Sendable () -> any SummarizationServicing,
+    checkpointStore: any SummarizationCheckpointStoring,
+    summarizationPreflightConfiguration: SummarizationPreflightConfiguration = .default,
+    dateProvider: @escaping @Sendable () -> Date = Date.init
+) -> MeetingPipelineCoordinator {
+    let bookmark = try? VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
+    let store = TestBookmarkStore(bookmark: bookmark)
+    let access = VaultAccess(bookmarkStore: store)
+
+    return MeetingPipelineCoordinator(
+        transcriptionService: transcriptionService,
+        diarizationService: TestDiarizationService(segments: []),
+        summarizationServiceProvider: summarizationServiceProvider,
+        modelManager: TestModelManager(progressSteps: [0, 1]),
+        checkpointStore: checkpointStore,
+        vaultAccess: access,
+        vaultWriter: TestVaultWriter(),
+        summarizationPreflightConfigurationProvider: { summarizationPreflightConfiguration },
+        dateProvider: dateProvider
+    )
+}
+
+private func makeLongTranscriptionResult(segmentCount: Int = 220) -> TranscriptionResult {
+    let segments = (0..<segmentCount).map { index in
+        TranscriptSegment(
+            startSeconds: TimeInterval(index) * 2,
+            endSeconds: TimeInterval(index) * 2 + 1.5,
+            text: "Segment \(index) repeated transcript content for deterministic multi-pass recovery validation."
+        )
+    }
+    let text = segments.map(\.text).joined(separator: "\n")
+    return TranscriptionResult(text: text, segments: segments)
+}
+
+private func makeMeetingRunID(for context: PipelineContext) -> String {
+    let seed = context.audioTempURL.standardizedFileURL.path + "|" + "\(Int(context.startedAt.timeIntervalSince1970))"
+    var hash: UInt64 = 5381
+    for byte in seed.utf8 {
+        hash = ((hash << 5) &+ hash) &+ UInt64(byte)
+    }
+    return "meeting-\(String(hash, radix: 16))"
+}
+
+private func statusesContainInOrder(
+    _ statuses: [SummarizationRunStatus],
+    sequence expected: [SummarizationRunStatus]
+) -> Bool {
+    var index = statuses.startIndex
+    for status in expected {
+        guard let found = statuses[index...].firstIndex(of: status) else {
+            return false
+        }
+        index = statuses.index(after: found)
+    }
+    return true
+}
+
+private func canonicalFileURL(_ url: URL) -> URL {
+    url.resolvingSymlinksInPath().standardizedFileURL
+}
+
+private func forcedMultiPassPreflightConfiguration() -> SummarizationPreflightConfiguration {
+    SummarizationPreflightConfiguration(
+        contextWindowTokens: 1_024,
+        reservedOutputTokens: 256,
+        safetyMarginTokens: 128,
+        promptOverheadTokens: 256
+    )
+}
+
+private actor RecordingCheckpointStore: SummarizationCheckpointStoring {
+    private var states: [String: SummarizationRunState] = [:]
+    private var saved: [String: [SummarizationRunState]] = [:]
+
+    func load(meetingID: String) async throws -> SummarizationRunState? {
+        states[meetingID]
+    }
+
+    func save(_ state: SummarizationRunState, for meetingID: String) async throws {
+        states[meetingID] = state
+        saved[meetingID, default: []].append(state)
+    }
+
+    func clear(meetingID: String) async {
+        states.removeValue(forKey: meetingID)
+    }
+
+    func savedStatuses(meetingID: String) -> [SummarizationRunStatus] {
+        saved[meetingID, default: []].map(\.status)
+    }
+
+    func lastSavedState(meetingID: String) -> SummarizationRunState? {
+        saved[meetingID]?.last
+    }
+}
+
+private actor ScriptedSummarizationService: SummarizationServicing {
+    enum Step: Sendable {
+        case succeed(String)
+        case fail(String)
+        case blockUntilCancelled
+    }
+
+    enum WaitError: Error {
+        case timeout
+    }
+
+    private let steps: [Step]
+    private var transcripts: [String] = []
+
+    init(steps: [Step]) {
+        self.steps = steps
+    }
+
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) async throws -> String {
+        _ = meetingDate
+        _ = meetingType
+        _ = languageProcessing
+        _ = outputLanguage
+
+        transcripts.append(transcript)
+        let index = transcripts.count - 1
+        let step = steps[min(index, max(steps.count - 1, 0))]
+
+        switch step {
+        case .succeed(let json):
+            return json
+        case .fail(let message):
+            throw MinuteError.llamaFailed(exitCode: -1, output: message)
+        case .blockUntilCancelled:
+            while true {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+    }
+
+    func classify(transcript: String) async throws -> MeetingType {
+        _ = transcript
+        return .general
+    }
+
+    func repairJSON(_ invalidJSON: String) async throws -> String {
+        invalidJSON
+    }
+
+    func waitUntilCallCount(_ expected: Int) async throws {
+        let deadline = Date().addingTimeInterval(1)
+
+        while transcripts.count < expected {
+            if Date() > deadline {
+                throw WaitError.timeout
+            }
+            await Task.yield()
+        }
+    }
+
+    func recordedTranscripts() -> [String] {
+        transcripts
+    }
+}
+
+private actor RuntimeAwareScriptedSummarizationService: RuntimeAwareSummarizationServicing {
+    private let plan: SummarizationRuntimePassPlan
+    private let passOutputs: [String]
+    private var summarizeCalls = 0
+    private var passChunks: [String] = []
+
+    init(plan: SummarizationRuntimePassPlan, passOutputs: [String]) {
+        self.plan = plan
+        self.passOutputs = passOutputs
+    }
+
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage
+    ) async throws -> String {
+        _ = transcript
+        _ = meetingDate
+        _ = meetingType
+        _ = languageProcessing
+        _ = outputLanguage
+        summarizeCalls += 1
+        return passOutputs.first ?? validExtractionJSON(title: "Fallback", date: "2025-01-12")
+    }
+
+    func summarize(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String {
+        _ = resolvedPromptBundle
+        return try await summarize(
+            transcript: transcript,
+            meetingDate: meetingDate,
+            meetingType: meetingType,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage
+        )
+    }
+
+    func makeRuntimePassPlan(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> SummarizationRuntimePassPlan {
+        _ = transcript
+        _ = meetingDate
+        _ = meetingType
+        _ = languageProcessing
+        _ = outputLanguage
+        _ = resolvedPromptBundle
+        return plan
+    }
+
+    func summarizePass(
+        transcriptChunk: String,
+        previousSummaryJSON: String?,
+        passIndex: Int,
+        totalPasses: Int,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String {
+        _ = previousSummaryJSON
+        _ = passIndex
+        _ = totalPasses
+        _ = meetingDate
+        _ = meetingType
+        _ = languageProcessing
+        _ = outputLanguage
+        _ = resolvedPromptBundle
+        passChunks.append(transcriptChunk)
+        return passOutputs[min(passChunks.count - 1, max(passOutputs.count - 1, 0))]
+    }
+
+    func classify(transcript: String) async throws -> MeetingType {
+        _ = transcript
+        return .general
+    }
+
+    func repairJSON(_ invalidJSON: String) async throws -> String {
+        invalidJSON
+    }
+
+    func summarizeCallCount() -> Int {
+        summarizeCalls
+    }
+
+    func recordedPassChunks() -> [String] {
+        passChunks
+    }
 }

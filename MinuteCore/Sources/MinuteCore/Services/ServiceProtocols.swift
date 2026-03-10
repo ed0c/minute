@@ -190,6 +190,69 @@ public protocol SummarizationServicing: Sendable {
     func repairJSON(_ invalidJSON: String) async throws -> String
 }
 
+public struct SummarizationRuntimeChunk: Sendable, Equatable {
+    public var transcript: String
+    public var tokenCount: Int
+
+    public init(transcript: String, tokenCount: Int) {
+        self.transcript = transcript
+        self.tokenCount = tokenCount
+    }
+}
+
+public struct SummarizationRuntimePassPlan: Sendable, Equatable {
+    public var contextWindowTokens: Int
+    public var reservedOutputTokens: Int
+    public var safetyMarginTokens: Int
+    public var promptOverheadTokens: Int
+    public var availableInputTokensPerPass: Int
+    public var estimatedTotalInputTokens: Int
+    public var chunks: [SummarizationRuntimeChunk]
+
+    public init(
+        contextWindowTokens: Int,
+        reservedOutputTokens: Int,
+        safetyMarginTokens: Int,
+        promptOverheadTokens: Int,
+        availableInputTokensPerPass: Int,
+        estimatedTotalInputTokens: Int,
+        chunks: [SummarizationRuntimeChunk]
+    ) {
+        self.contextWindowTokens = contextWindowTokens
+        self.reservedOutputTokens = reservedOutputTokens
+        self.safetyMarginTokens = safetyMarginTokens
+        self.promptOverheadTokens = promptOverheadTokens
+        self.availableInputTokensPerPass = availableInputTokensPerPass
+        self.estimatedTotalInputTokens = estimatedTotalInputTokens
+        self.chunks = chunks
+    }
+}
+
+public protocol RuntimeAwareSummarizationServicing: SummarizationServicing {
+    /// Optionally refines transcript chunking after the underlying runtime is loaded and its tokenizer is available.
+    func makeRuntimePassPlan(
+        transcript: String,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> SummarizationRuntimePassPlan
+
+    /// Summarizes a single pass while allowing the implementation to reuse already-loaded runtime state.
+    func summarizePass(
+        transcriptChunk: String,
+        previousSummaryJSON: String?,
+        passIndex: Int,
+        totalPasses: Int,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String
+}
+
 public extension SummarizationServicing {
     func summarize(
         transcript: String,
@@ -221,6 +284,65 @@ public extension SummarizationServicing {
             return resolvedID
         }
         return fallbackTypeID
+    }
+}
+
+public extension RuntimeAwareSummarizationServicing {
+    func summarizePass(
+        transcriptChunk: String,
+        previousSummaryJSON: String?,
+        passIndex: Int,
+        totalPasses: Int,
+        meetingDate: Date,
+        meetingType: MeetingType,
+        languageProcessing: LanguageProcessingProfile,
+        outputLanguage: OutputLanguage,
+        resolvedPromptBundle: ResolvedPromptBundle?
+    ) async throws -> String {
+        let existingStateBlock: String
+        if let previousSummaryJSON,
+           !previousSummaryJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            existingStateBlock = """
+            Existing accepted state:
+            \(previousSummaryJSON)
+
+            """
+        } else {
+            existingStateBlock = ""
+        }
+
+        let transcript = """
+        Process summarization pass \(passIndex) of \(totalPasses).
+        Use the existing accepted state only to avoid duplicates.
+        Return only net-new material from this chunk.
+
+        Return one valid JSON object with exactly these fields:
+        - title (string; empty string if unchanged)
+        - date (YYYY-MM-DD; empty string if unchanged)
+        - summary_points (array of short, high-signal new facts from this chunk only)
+        - decisions (array of new decisions only)
+        - action_items (array of objects with owner and task; new or materially refined items only)
+        - open_questions (array of new open questions only)
+        - key_points (array of new key points only)
+
+        Rules:
+        - Do not restate information already captured in the existing accepted state.
+        - Do not rewrite the full meeting summary.
+        - Use empty arrays when there is nothing new for a field.
+        - Do not output markdown fences or prose outside JSON.
+
+        \(existingStateBlock)Transcript chunk:
+        \(transcriptChunk)
+        """
+
+        return try await summarize(
+            transcript: transcript,
+            meetingDate: meetingDate,
+            meetingType: meetingType,
+            languageProcessing: languageProcessing,
+            outputLanguage: outputLanguage,
+            resolvedPromptBundle: resolvedPromptBundle
+        )
     }
 }
 
@@ -318,4 +440,15 @@ public protocol ResolvedPromptBundleResolving: Sendable {
         outputLanguage: OutputLanguage,
         autodetectResolvedTypeID: String?
     ) throws -> ResolvedPromptBundle
+}
+
+public protocol SummarizationCheckpointStoring: Sendable {
+    func load(meetingID: String) async throws -> SummarizationRunState?
+    func save(_ state: SummarizationRunState, for meetingID: String) async throws
+    func clear(meetingID: String) async
+}
+
+public protocol MeetingRunGating: Sendable {
+    func beginIfPossible(meetingID: String) async -> Bool
+    func end(meetingID: String) async
 }

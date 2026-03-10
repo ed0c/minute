@@ -88,3 +88,116 @@ public struct ActionItem: Codable, Equatable, Sendable {
         self.task = task
     }
 }
+
+public struct SummarizationPassDelta: Codable, Equatable, Sendable {
+    public var title: String
+    public var date: String
+    public var summaryPoints: [String]
+    public var decisions: [String]
+    public var actionItems: [ActionItem]
+    public var openQuestions: [String]
+    public var keyPoints: [String]
+
+    public init(
+        title: String = "",
+        date: String = "",
+        summaryPoints: [String] = [],
+        decisions: [String] = [],
+        actionItems: [ActionItem] = [],
+        openQuestions: [String] = [],
+        keyPoints: [String] = []
+    ) {
+        self.title = title
+        self.date = date
+        self.summaryPoints = summaryPoints
+        self.decisions = decisions
+        self.actionItems = actionItems
+        self.openQuestions = openQuestions
+        self.keyPoints = keyPoints
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case date
+        case summary
+        case summaryPoints = "summary_points"
+        case decisions
+        case actionItems = "action_items"
+        case openQuestions = "open_questions"
+        case keyPoints = "key_points"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        date = try container.decodeIfPresent(String.self, forKey: .date) ?? ""
+        let explicitSummaryPoints = try container.decodeIfPresent([String].self, forKey: .summaryPoints) ?? []
+        let legacySummary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        summaryPoints = explicitSummaryPoints.isEmpty ? Self.summaryPoints(from: legacySummary) : explicitSummaryPoints
+        decisions = try container.decodeIfPresent([String].self, forKey: .decisions) ?? []
+        actionItems = try container.decodeIfPresent([ActionItem].self, forKey: .actionItems) ?? []
+        openQuestions = try container.decodeIfPresent([String].self, forKey: .openQuestions) ?? []
+        keyPoints = try container.decodeIfPresent([String].self, forKey: .keyPoints) ?? []
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(date, forKey: .date)
+        try container.encode(summaryPoints, forKey: .summaryPoints)
+        try container.encode(decisions, forKey: .decisions)
+        try container.encode(actionItems, forKey: .actionItems)
+        try container.encode(openQuestions, forKey: .openQuestions)
+        try container.encode(keyPoints, forKey: .keyPoints)
+    }
+
+    public static func summaryPoints(from summary: String) -> [String] {
+        let normalized = StringNormalizer.normalizeParagraph(summary)
+        guard !normalized.isEmpty else { return [] }
+        return [normalized]
+    }
+}
+
+public struct SummarizationMergeState: Codable, Equatable, Sendable {
+    public var title: String
+    public var date: String
+    public var summaryPoints: [String]
+    public var decisions: [String]
+    public var actionItems: [ActionItem]
+    public var openQuestions: [String]
+    public var keyPoints: [String]
+    public var meetingType: MeetingType?
+
+    public init(
+        title: String = "",
+        date: String = "",
+        summaryPoints: [String] = [],
+        decisions: [String] = [],
+        actionItems: [ActionItem] = [],
+        openQuestions: [String] = [],
+        keyPoints: [String] = [],
+        meetingType: MeetingType? = nil
+    ) {
+        self.title = title
+        self.date = date
+        self.summaryPoints = summaryPoints
+        self.decisions = decisions
+        self.actionItems = actionItems
+        self.openQuestions = openQuestions
+        self.keyPoints = keyPoints
+        self.meetingType = meetingType
+    }
+
+    public init(extraction: MeetingExtraction) {
+        self.init(
+            title: extraction.title,
+            date: extraction.date,
+            summaryPoints: SummarizationPassDelta.summaryPoints(from: extraction.summary),
+            decisions: extraction.decisions,
+            actionItems: extraction.actionItems,
+            openQuestions: extraction.openQuestions,
+            keyPoints: extraction.keyPoints,
+            meetingType: extraction.meetingType
+        )
+    }
+}
