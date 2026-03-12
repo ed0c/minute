@@ -177,11 +177,9 @@ public actor MeetingProcessingOrchestrator {
     }
 
     private func updateProgress(_ progress: PipelineProgress) {
-        let hasChanged = activeStage != progress.stage || activeProgress != progress.fractionCompleted
-        activeStage = progress.stage
-        activeProgress = progress.fractionCompleted
+        let nextSummarizationStatus: ActiveSummarizationStatus?
         if progress.stage == .summarizing {
-            activeSummarizationStatus = ActiveSummarizationStatus(
+            nextSummarizationStatus = ActiveSummarizationStatus(
                 preflightBudgetTokens: progress.preflightBudgetTokens,
                 estimatedPassCount: progress.estimatedPassCount,
                 currentPassIndex: progress.currentPassIndex,
@@ -189,12 +187,17 @@ public actor MeetingProcessingOrchestrator {
                 resumedFromPassIndex: progress.resumedFromPassIndex
             )
         } else {
-            activeSummarizationStatus = nil
+            nextSummarizationStatus = nil
         }
-        if hasChanged {
-            broadcastSnapshot()
-            return
-        }
+
+        let hasChanged =
+            activeStage != progress.stage ||
+            activeProgress != progress.fractionCompleted ||
+            activeSummarizationStatus != nextSummarizationStatus
+        activeStage = progress.stage
+        activeProgress = progress.fractionCompleted
+        activeSummarizationStatus = nextSummarizationStatus
+        guard hasChanged else { return }
         broadcastSnapshot()
     }
 

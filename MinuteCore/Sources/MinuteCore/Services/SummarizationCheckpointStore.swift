@@ -3,14 +3,23 @@ import Foundation
 public actor DefaultSummarizationCheckpointStore: SummarizationCheckpointStoring {
     private let fileManager: FileManager
     private let baseDirectoryURL: URL
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
     public init(
         fileManager: FileManager = .default,
         baseDirectoryURL: URL? = nil
     ) {
         self.fileManager = fileManager
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom(Self.decodeDate)
+        self.decoder = decoder
+
         if let baseDirectoryURL {
             self.baseDirectoryURL = baseDirectoryURL
         } else {
@@ -66,6 +75,39 @@ public actor DefaultSummarizationCheckpointStore: SummarizationCheckpointStoring
         }
         let value = String(allowed)
         return value.isEmpty ? "meeting" : value
+    }
+
+    private static func decodeDate(from decoder: Decoder) throws -> Date {
+        let container = try decoder.singleValueContainer()
+        let fractionalSecondsFormatter = makeISO8601Formatter(withFractionalSeconds: true)
+        let formatter = makeISO8601Formatter(withFractionalSeconds: false)
+
+        if let value = try? container.decode(String.self),
+           let date = fractionalSecondsFormatter.date(from: value)
+            ?? formatter.date(from: value) {
+            return date
+        }
+
+        if let value = try? container.decode(Double.self) {
+            return Date(timeIntervalSinceReferenceDate: value)
+        }
+
+        if let value = try? container.decode(Int.self) {
+            return Date(timeIntervalSinceReferenceDate: Double(value))
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Expected ISO-8601 string or legacy reference-date timestamp."
+        )
+    }
+
+    private static func makeISO8601Formatter(withFractionalSeconds: Bool) -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = withFractionalSeconds
+            ? [.withInternetDateTime, .withFractionalSeconds]
+            : [.withInternetDateTime]
+        return formatter
     }
 }
 

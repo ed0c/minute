@@ -1,6 +1,8 @@
 import Foundation
 
 public enum SummarizationSummaryMerger {
+    private static let normalizationLocale = Locale(identifier: "en_US_POSIX")
+
     public static func merge(
         previousState: SummarizationMergeState?,
         delta: SummarizationPassDelta,
@@ -158,7 +160,7 @@ public enum SummarizationSummaryMerger {
 
     private static func normalizedKey(_ value: String) -> String {
         let folded = StringNormalizer.normalizeInline(value)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: normalizationLocale)
 
         let scalars = folded.unicodeScalars.map { scalar -> Character in
             if CharacterSet.alphanumerics.contains(scalar) {

@@ -246,6 +246,7 @@ struct MeetingPipelineCoordinatorTests {
                 )
             },
             checkpointStore: checkpointStore,
+            summarizationModelID: "llama-test",
             summarizationPreflightConfiguration: SummarizationPreflightConfiguration(
                 contextWindowTokens: 32_768,
                 reservedOutputTokens: 1_024
@@ -259,6 +260,9 @@ struct MeetingPipelineCoordinatorTests {
 
         #expect(finalState?.tokenBudgetEstimate?.contextWindowTokens == 32_768)
         #expect(finalState?.tokenBudgetEstimate?.availableInputTokensPerPass == 30_976)
+        #expect(finalState?.tokenBudgetEstimate?.modelID == "llama-test")
+        #expect(finalState?.tokenBudgetEstimate?.runID == finalState?.runID)
+        #expect(finalState?.passPlan?.runID == finalState?.runID)
     }
 
     @Test
@@ -363,6 +367,45 @@ struct MeetingPipelineCoordinatorTests {
         #expect(noteContents.contains("First pass summary"))
         #expect(noteContents.contains("Second pass summary"))
         #expect(remainingState == nil)
+    }
+
+    @Test
+    func execute_laterPassTitleRenamesProgressNotePath() async throws {
+        let vaultRootURL = try makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vaultRootURL) }
+
+        let checkpointStore = RecordingCheckpointStore()
+        let context = try makePipelineContext(saveAudio: false, saveTranscript: false)
+        let summarizationService = ScriptedSummarizationService(
+            steps: [
+                .succeed(validExtractionJSON(title: "", date: "2025-01-12", summary: "First pass summary")),
+                .succeed(validExtractionJSON(title: "Weekly Sync", date: "2025-01-12", summary: "Second pass summary")),
+            ]
+        )
+        let coordinator = makeRecoveryCoordinator(
+            vaultRootURL: vaultRootURL,
+            transcriptionService: TestTranscriptionService(result: makeLongTranscriptionResult(segmentCount: 120)),
+            summarizationServiceProvider: { summarizationService },
+            checkpointStore: checkpointStore,
+            summarizationPreflightConfiguration: forcedMultiPassPreflightConfiguration()
+        )
+
+        let result = try await coordinator.execute(context: context)
+        let contract = MeetingFileContract(folders: context.vaultFolders)
+        let untitledURL = vaultRootURL.appendingPathComponent(
+            contract.noteRelativePath(date: context.startedAt, title: "Untitled")
+        )
+        let titledURL = vaultRootURL.appendingPathComponent(
+            contract.noteRelativePath(date: context.startedAt, title: "Weekly Sync")
+        )
+
+        #expect(canonicalFileURL(result.noteURL) == canonicalFileURL(titledURL))
+        #expect(FileManager.default.fileExists(atPath: titledURL.path))
+        #expect(!FileManager.default.fileExists(atPath: untitledURL.path))
+
+        let noteContents = try String(contentsOf: result.noteURL)
+        #expect(noteContents.contains("First pass summary"))
+        #expect(noteContents.contains("Second pass summary"))
     }
 
     @Test
@@ -594,6 +637,7 @@ private func makeCoordinator(
         text: "Hello world",
         segments: [TranscriptSegment(startSeconds: 0, endSeconds: 1, text: "Hello world")]
     )),
+    summarizationModelID: String = SummarizationModelCatalog.defaultModel.id,
     dateProvider: @escaping @Sendable () -> Date = Date.init
 ) -> MeetingPipelineCoordinator {
     let bookmark = try? VaultAccess.makeBookmarkData(forVaultRootURL: vaultRootURL)
@@ -609,6 +653,7 @@ private func makeCoordinator(
         modelManager: TestModelManager(progressSteps: [0, 1]),
         vaultAccess: access,
         vaultWriter: TestVaultWriter(),
+        summarizationModelIDProvider: { summarizationModelID },
         dateProvider: dateProvider
     )
 }
@@ -684,6 +729,7 @@ private func makeRecoveryCoordinator(
     transcriptionService: some TranscriptionServicing,
     summarizationServiceProvider: @escaping @Sendable () -> any SummarizationServicing,
     checkpointStore: any SummarizationCheckpointStoring,
+    summarizationModelID: String = SummarizationModelCatalog.defaultModel.id,
     summarizationPreflightConfiguration: SummarizationPreflightConfiguration = .default,
     dateProvider: @escaping @Sendable () -> Date = Date.init
 ) -> MeetingPipelineCoordinator {
@@ -699,6 +745,7 @@ private func makeRecoveryCoordinator(
         checkpointStore: checkpointStore,
         vaultAccess: access,
         vaultWriter: TestVaultWriter(),
+        summarizationModelIDProvider: { summarizationModelID },
         summarizationPreflightConfigurationProvider: { summarizationPreflightConfiguration },
         dateProvider: dateProvider
     )

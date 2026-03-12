@@ -15,6 +15,7 @@ public actor MeetingPipelineCoordinator {
     private let vaultWriter: any VaultWriting
     private let speakerProfileStore: SpeakerProfileStore
     private let meetingSpeakerEmbeddingCache: MeetingSpeakerEmbeddingCache
+    private let summarizationModelIDProvider: @Sendable () -> String
     private let summarizationPreflightConfigurationProvider: @Sendable () -> SummarizationPreflightConfiguration
     private let dateProvider: @Sendable () -> Date
 
@@ -40,6 +41,7 @@ public actor MeetingPipelineCoordinator {
         vaultWriter: some VaultWriting,
         speakerProfileStore: SpeakerProfileStore = SpeakerProfileStore(),
         meetingSpeakerEmbeddingCache: MeetingSpeakerEmbeddingCache = MeetingSpeakerEmbeddingCache(),
+        summarizationModelIDProvider: @escaping @Sendable () -> String = { SummarizationModelCatalog.defaultModel.id },
         summarizationPreflightConfigurationProvider: @escaping @Sendable () -> SummarizationPreflightConfiguration = { .default },
         dateProvider: @escaping @Sendable () -> Date = Date.init
     ) {
@@ -56,6 +58,7 @@ public actor MeetingPipelineCoordinator {
         self.vaultWriter = vaultWriter
         self.speakerProfileStore = speakerProfileStore
         self.meetingSpeakerEmbeddingCache = meetingSpeakerEmbeddingCache
+        self.summarizationModelIDProvider = summarizationModelIDProvider
         self.summarizationPreflightConfigurationProvider = summarizationPreflightConfigurationProvider
         self.dateProvider = dateProvider
     }
@@ -68,12 +71,26 @@ public actor MeetingPipelineCoordinator {
         guard await runGate.beginIfPossible(meetingID: meetingRunID) else {
             throw MinuteError.pipelineRunAlreadyActive
         }
-        defer {
-            Task {
-                await runGate.end(meetingID: meetingRunID)
-            }
-        }
 
+        do {
+            let result = try await executePipelineRun(
+                context: context,
+                meetingRunID: meetingRunID,
+                progress: progress
+            )
+            await runGate.end(meetingID: meetingRunID)
+            return result
+        } catch {
+            await runGate.end(meetingID: meetingRunID)
+            throw error
+        }
+    }
+
+    private func executePipelineRun(
+        context: PipelineContext,
+        meetingRunID: String,
+        progress: (@Sendable (PipelineProgress) -> Void)? = nil
+    ) async throws -> PipelineResult {
         do {
             var context = context
             try Task.checkCancellation()
@@ -191,9 +208,10 @@ public actor MeetingPipelineCoordinator {
                 availableInputTokensPerPass: preflight.availableInputTokensPerPass
             )
             let runID = existingRunState?.runID ?? UUID().uuidString
+            let summarizationModelID = summarizationModelIDProvider()
             var budgetEstimate = SummarizationTokenBudgetEstimate(
                 runID: runID,
-                modelID: context.meetingTypeSelection.selectedTypeId,
+                modelID: summarizationModelID,
                 contextWindowTokens: preflight.contextWindowTokens,
                 reservedOutputTokens: preflight.reservedOutputTokens,
                 safetyMarginTokens: preflight.safetyMarginTokens,
@@ -203,7 +221,7 @@ public actor MeetingPipelineCoordinator {
                 estimatedPassCount: preflight.estimatedPassCount
             )
             var chunkTexts = chunks
-            var passPlan = makePassPlan(runID: meetingRunID, chunks: chunks)
+            var passPlan = makePassPlan(runID: runID, chunks: chunks)
             var passRecords = passPlan.chunks.map {
                 SummarizationPassRecord(passIndex: $0.passIndex, chunkID: $0.chunkID, status: .pending)
             }
@@ -228,7 +246,7 @@ public actor MeetingPipelineCoordinator {
                 lastValidCheckpoint: existingRunState?.lastValidCheckpoint,
                 passRecords: passRecords
             )
-            try? await checkpointStore.save(planningState, for: meetingRunID)
+            await saveCheckpointState(planningState, for: meetingRunID, operation: "planning")
 
             try Task.checkCancellation()
             let summarizationService = summarizationServiceProvider()
@@ -285,10 +303,10 @@ public actor MeetingPipelineCoordinator {
                     resolvedPromptBundle: resolvedPromptBundle
                 )
                 chunkTexts = runtimePlan.chunks.map(\.transcript)
-                passPlan = makePassPlan(runID: meetingRunID, chunks: runtimePlan.chunks)
+                passPlan = makePassPlan(runID: runID, chunks: runtimePlan.chunks)
                 budgetEstimate = SummarizationTokenBudgetEstimate(
                     runID: runID,
-                    modelID: context.meetingTypeSelection.selectedTypeId,
+                    modelID: summarizationModelID,
                     contextWindowTokens: runtimePlan.contextWindowTokens,
                     reservedOutputTokens: runtimePlan.reservedOutputTokens,
                     safetyMarginTokens: runtimePlan.safetyMarginTokens,
@@ -320,7 +338,7 @@ public actor MeetingPipelineCoordinator {
                     lastValidCheckpoint: existingRunState?.lastValidCheckpoint,
                     passRecords: passRecords
                 )
-                try? await checkpointStore.save(refinedPlanningState, for: meetingRunID)
+                await saveCheckpointState(refinedPlanningState, for: meetingRunID, operation: "runtime planning")
             }
 
             let totalPasses = max(1, passPlan.chunks.count)
@@ -376,7 +394,7 @@ public actor MeetingPipelineCoordinator {
                         lastValidCheckpoint: lastValidCheckpoint,
                         passRecords: passRecords
                     )
-                    try? await checkpointStore.save(runningState, for: meetingRunID)
+                    await saveCheckpointState(runningState, for: meetingRunID, operation: "running pass \(passIndex)")
 
                     let chunkIndex = max(0, min(chunkTexts.count - 1, passIndex - 1))
                     let chunk = chunkTexts[chunkIndex]
@@ -454,12 +472,11 @@ public actor MeetingPipelineCoordinator {
                         return updated
                     }
 
-                    if resolvedOutputPaths == nil {
-                        resolvedOutputPaths = try resolveStableOutputPaths(
-                            context: context,
-                            extraction: extraction
-                        )
-                    }
+                    resolvedOutputPaths = try reconcileOutputPaths(
+                        context: context,
+                        currentPaths: resolvedOutputPaths,
+                        extraction: extraction
+                    )
                     if let resolvedOutputPaths {
                         try writeSummaryNoteToVault(
                             context: context,
@@ -482,7 +499,7 @@ public actor MeetingPipelineCoordinator {
                         lastValidCheckpoint: checkpoint,
                         passRecords: passRecords
                     )
-                    try? await checkpointStore.save(passState, for: meetingRunID)
+                    await saveCheckpointState(passState, for: meetingRunID, operation: "completed pass \(passIndex)")
                     lastValidCheckpoint = checkpoint
 
                     let fraction = 0.5 + (0.34 * (Double(passIndex) / Double(totalPasses)))
@@ -524,7 +541,7 @@ public actor MeetingPipelineCoordinator {
                 lastValidCheckpoint: completedCheckpoint,
                 passRecords: passRecords
             )
-            try? await checkpointStore.save(completedState, for: meetingRunID)
+            await saveCheckpointState(completedState, for: meetingRunID, operation: "completion")
 
             try Task.checkCancellation()
             progress?(.writing(fractionCompleted: 0.85, extraction: extraction))
@@ -574,7 +591,7 @@ public actor MeetingPipelineCoordinator {
                     updated.errorMessage = nil
                     return updated
                 }
-                try? await checkpointStore.save(cancelledState, for: meetingRunID)
+                await saveCheckpointState(cancelledState, for: meetingRunID, operation: "cancellation")
             }
             throw CancellationError()
         } catch {
@@ -594,7 +611,7 @@ public actor MeetingPipelineCoordinator {
                     }
                     return record
                 }
-                try? await checkpointStore.save(failedState, for: meetingRunID)
+                await saveCheckpointState(failedState, for: meetingRunID, operation: "failure")
             }
             // Keep capture audio on failures so retry can reuse the same context safely.
             cleanupTemporaryArtifacts(for: context, policy: .workingDirectoryOnly)
@@ -784,7 +801,8 @@ public actor MeetingPipelineCoordinator {
         vaultRootURL: URL,
         noteRelativePath: String,
         audioRelativePath: String?,
-        transcriptRelativePath: String?
+        transcriptRelativePath: String?,
+        ignoringExistingPaths: Set<String> = []
     ) -> ResolvedOutputPaths {
         let fileManager = FileManager.default
 
@@ -797,6 +815,7 @@ public actor MeetingPipelineCoordinator {
         let noteRelativePath = normalizeRelativePath(noteRelativePath)
         let audioRelativePath = audioRelativePath.map(normalizeRelativePath)
         let transcriptRelativePath = transcriptRelativePath.map(normalizeRelativePath)
+        let ignoredPaths = Set(ignoringExistingPaths.map(normalizeRelativePath))
 
         func withSuffix(_ relativePath: String, suffix: String) -> String {
             let ns = relativePath as NSString
@@ -807,11 +826,16 @@ public actor MeetingPipelineCoordinator {
 
         func exists(_ relativePath: String?) -> Bool {
             guard let relativePath else { return false }
+            if ignoredPaths.contains(relativePath) {
+                return false
+            }
             return fileManager.fileExists(atPath: vaultRootURL.appendingPathComponent(relativePath).path)
         }
 
         // Fast path: no collision.
-        if !exists(noteRelativePath) {
+        if !exists(noteRelativePath),
+           !exists(audioRelativePath),
+           !exists(transcriptRelativePath) {
             return ResolvedOutputPaths(
                 noteRelativePath: noteRelativePath,
                 audioRelativePath: audioRelativePath,
@@ -843,8 +867,9 @@ public actor MeetingPipelineCoordinator {
         )
     }
 
-    private func resolveStableOutputPaths(
+    private func reconcileOutputPaths(
         context: PipelineContext,
+        currentPaths: ResolvedOutputPaths?,
         extraction: MeetingExtraction
     ) throws -> ResolvedOutputPaths {
         try vaultAccess.withVaultAccess { vaultRootURL in
@@ -852,12 +877,31 @@ public actor MeetingPipelineCoordinator {
             let noteRelativePath = contract.noteRelativePath(date: context.startedAt, title: extraction.title)
             let audioRelativePath = context.saveAudio ? contract.audioRelativePath(date: context.startedAt, title: extraction.title) : nil
             let transcriptRelativePath = context.saveTranscript ? contract.transcriptRelativePath(date: context.startedAt, title: extraction.title) : nil
-            return resolveOutputPaths(
+            let resolvedPaths = resolveOutputPaths(
                 vaultRootURL: vaultRootURL,
                 noteRelativePath: noteRelativePath,
                 audioRelativePath: audioRelativePath,
-                transcriptRelativePath: transcriptRelativePath
+                transcriptRelativePath: transcriptRelativePath,
+                ignoringExistingPaths: Set(
+                    [currentPaths?.noteRelativePath, currentPaths?.audioRelativePath, currentPaths?.transcriptRelativePath]
+                        .compactMap { $0 }
+                )
             )
+
+            guard let currentPaths,
+                  currentPaths.noteRelativePath != resolvedPaths.noteRelativePath else {
+                return resolvedPaths
+            }
+
+            let currentNoteURL = vaultRootURL.appendingPathComponent(currentPaths.noteRelativePath)
+            let resolvedNoteURL = vaultRootURL.appendingPathComponent(resolvedPaths.noteRelativePath)
+
+            if FileManager.default.fileExists(atPath: currentNoteURL.path) {
+                try vaultWriter.ensureDirectoryExists(resolvedNoteURL.deletingLastPathComponent())
+                try FileManager.default.moveItem(at: currentNoteURL, to: resolvedNoteURL)
+            }
+
+            return resolvedPaths
         }
     }
 
@@ -1030,6 +1074,20 @@ public actor MeetingPipelineCoordinator {
             )
         }
         return SummarizationPassPlan(runID: runID, chunks: plans)
+    }
+
+    private func saveCheckpointState(
+        _ state: SummarizationRunState,
+        for meetingID: String,
+        operation: String
+    ) async {
+        do {
+            try await checkpointStore.save(state, for: meetingID)
+        } catch {
+            logger.error(
+                "Failed to save summarization checkpoint during \(operation, privacy: .public) [meetingID=\(meetingID, privacy: .public)]: \(ErrorHandler.debugMessage(for: error), privacy: .private(mask: .hash))"
+            )
+        }
     }
 
     private func diarizeIfPossible(wavURL: URL, embeddingExportURL: URL?) async -> [SpeakerSegment] {

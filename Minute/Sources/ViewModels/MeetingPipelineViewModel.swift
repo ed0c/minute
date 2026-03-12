@@ -515,6 +515,7 @@ final class MeetingPipelineViewModel: ObservableObject {
             modelManager: modelManager,
             vaultAccess: vaultAccess,
             vaultWriter: DefaultVaultWriter(),
+            summarizationModelIDProvider: { selectionStore.selectedModel().id },
             summarizationPreflightConfigurationProvider: {
                 SummarizationPreflightConfiguration(
                     contextWindowTokens: contextWindowStore.requestedContextTokens(

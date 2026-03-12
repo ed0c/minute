@@ -10,6 +10,7 @@ struct SummarizationCheckpointStoreTests {
         defer { try? FileManager.default.removeItem(at: baseURL) }
 
         let store = DefaultSummarizationCheckpointStore(baseDirectoryURL: baseURL)
+        let checkpointDate = Date(timeIntervalSince1970: 1_700_000_000)
         let state = SummarizationRunState(
             runID: "run-1",
             meetingID: "meeting-1",
@@ -19,7 +20,8 @@ struct SummarizationCheckpointStoreTests {
             lastValidCheckpoint: SummarizationSummaryCheckpoint(
                 completedPassIndex: 2,
                 summaryJSON: "{\"title\":\"Weekly\"}",
-                sourceChunkIDs: ["c1", "c2"]
+                sourceChunkIDs: ["c1", "c2"],
+                updatedAt: checkpointDate
             ),
             passRecords: [
                 SummarizationPassRecord(passIndex: 1, chunkID: "c1", status: .completed),
@@ -119,5 +121,95 @@ struct SummarizationCheckpointStoreTests {
         #expect(loaded?.currentPassIndex == 2)
         #expect(loaded?.lastValidCheckpoint?.completedPassIndex == 2)
         #expect(loaded?.lastValidCheckpoint?.sourceChunkIDs == ["c1", "c2"])
+    }
+
+    @Test
+    func saveEncodesDatesAsISO8601Strings() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-checkpoint-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        let store = DefaultSummarizationCheckpointStore(baseDirectoryURL: baseURL)
+        let state = SummarizationRunState(
+            runID: "run-iso",
+            meetingID: "meeting-iso",
+            status: .running,
+            currentPassIndex: 1,
+            totalPassCount: 2,
+            tokenBudgetEstimate: SummarizationTokenBudgetEstimate(
+                runID: "run-iso",
+                modelID: "llama-test",
+                contextWindowTokens: 8192,
+                reservedOutputTokens: 1024,
+                safetyMarginTokens: 256,
+                promptOverheadTokens: 640,
+                availableInputTokensPerPass: 6272,
+                estimatedTotalInputTokens: 3000,
+                estimatedPassCount: 2,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            lastValidCheckpoint: SummarizationSummaryCheckpoint(
+                completedPassIndex: 1,
+                summaryJSON: "{\"title\":\"Weekly\"}",
+                sourceChunkIDs: ["c1"],
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        )
+
+        try await store.save(state, for: "meeting-iso")
+
+        let fileURL = baseURL.appendingPathComponent("meeting-iso.json")
+        let rawJSON = try String(contentsOf: fileURL)
+
+        #expect(rawJSON.contains("\"createdAt\":\""))
+        #expect(rawJSON.contains("\"updatedAt\":\""))
+        #expect(rawJSON.contains("T"))
+    }
+
+    @Test
+    func loadDecodesLegacyReferenceDateTimestamps() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minute-checkpoint-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        let createdAt = 100.0
+        let updatedAt = 200.0
+        let legacyJSON = """
+        {
+          "runID": "run-legacy",
+          "meetingID": "meeting-legacy",
+          "status": "pausedForRetry",
+          "currentPassIndex": 1,
+          "totalPassCount": 2,
+          "tokenBudgetEstimate": {
+            "runID": "run-legacy",
+            "modelID": "llama-legacy",
+            "contextWindowTokens": 8192,
+            "reservedOutputTokens": 1024,
+            "safetyMarginTokens": 256,
+            "promptOverheadTokens": 640,
+            "availableInputTokensPerPass": 6272,
+            "estimatedTotalInputTokens": 3000,
+            "estimatedPassCount": 2,
+            "createdAt": \(createdAt)
+          },
+          "lastValidCheckpoint": {
+            "completedPassIndex": 1,
+            "summaryJSON": "{\\"title\\":\\"Legacy\\"}",
+            "sourceChunkIDs": ["c1"],
+            "updatedAt": \(updatedAt)
+          },
+          "passRecords": []
+        }
+        """
+        let fileURL = baseURL.appendingPathComponent("meeting-legacy.json")
+        try legacyJSON.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let store = DefaultSummarizationCheckpointStore(baseDirectoryURL: baseURL)
+        let loaded = try await store.load(meetingID: "meeting-legacy")
+
+        #expect(loaded?.tokenBudgetEstimate?.createdAt == Date(timeIntervalSinceReferenceDate: createdAt))
+        #expect(loaded?.lastValidCheckpoint?.updatedAt == Date(timeIntervalSinceReferenceDate: updatedAt))
     }
 }
