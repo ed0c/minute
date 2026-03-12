@@ -7,8 +7,10 @@ struct PipelineStatusPresenter {
         var backgroundProcessingSnapshot: BackgroundProcessingSnapshot
         var isFirstScreenInferenceDeferred: Bool
         var progress: Double?
+        var statusLabelOverride: String?
         var recoverableRecordings: [RecoverableRecording]
         var recordingWarningDetail: String?
+        var summarizationProgressDetail: String?
     }
 
     enum Action: Equatable {
@@ -65,6 +67,8 @@ struct PipelineStatusPresenter {
             switch stage {
             case .downloadingModels:
                 title = "Downloading Models"
+            case .normalizingAudioLevels:
+                title = "Normalizing Audio Levels"
             case .transcribing:
                 title = "Transcribing"
             case .summarizing:
@@ -81,10 +85,17 @@ struct PipelineStatusPresenter {
             let detail = hasPending
                 ? baseDetail + " Another meeting is pending next."
                 : baseDetail
+            let detailWithSummarization: String
+            if stage == .summarizing,
+               let summarizationProgressDetail = input.summarizationProgressDetail {
+                detailWithSummarization = detail + " " + summarizationProgressDetail
+            } else {
+                detailWithSummarization = detail
+            }
 
             return Presentation(
                 title: title,
-                detail: detail,
+                detail: detailWithSummarization,
                 progress: progress,
                 showsActivity: progress == nil,
                 isError: false,
@@ -162,7 +173,7 @@ struct PipelineStatusPresenter {
             )
         case .processing, .writing, .importing:
             return Presentation(
-                title: input.state.statusLabel,
+                title: input.statusLabelOverride ?? input.state.statusLabel,
                 detail: "Meeting is being processed.",
                 progress: input.progress,
                 showsActivity: input.progress == nil,

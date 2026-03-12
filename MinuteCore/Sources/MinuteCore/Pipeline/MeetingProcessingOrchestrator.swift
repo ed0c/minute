@@ -21,6 +21,7 @@ public actor MeetingProcessingOrchestrator {
 
     private var activeStage: PipelineStage?
     private var activeProgress: Double?
+    private var activeSummarizationStatus: ActiveSummarizationStatus?
     private var lastOutcome: BackgroundProcessingOutcome?
 
     private var activeTask: Task<Void, Never>?
@@ -143,6 +144,7 @@ public actor MeetingProcessingOrchestrator {
         activeContext = context
         activeStage = nil
         activeProgress = nil
+        activeSummarizationStatus = nil
         lastOutcome = nil
         broadcastSnapshot()
 
@@ -175,12 +177,28 @@ public actor MeetingProcessingOrchestrator {
     }
 
     private func updateProgress(_ progress: PipelineProgress) {
-        let hasChanged = activeStage != progress.stage || activeProgress != progress.fractionCompleted
+        let nextSummarizationStatus: ActiveSummarizationStatus?
+        if progress.stage == .summarizing {
+            nextSummarizationStatus = ActiveSummarizationStatus(
+                preflightBudgetTokens: progress.preflightBudgetTokens,
+                estimatedPassCount: progress.estimatedPassCount,
+                currentPassIndex: progress.currentPassIndex,
+                totalPassCount: progress.totalPassCount,
+                resumedFromPassIndex: progress.resumedFromPassIndex
+            )
+        } else {
+            nextSummarizationStatus = nil
+        }
+
+        let hasChanged =
+            activeStage != progress.stage ||
+            activeProgress != progress.fractionCompleted ||
+            activeSummarizationStatus != nextSummarizationStatus
         activeStage = progress.stage
         activeProgress = progress.fractionCompleted
-        if hasChanged {
-            broadcastSnapshot()
-        }
+        activeSummarizationStatus = nextSummarizationStatus
+        guard hasChanged else { return }
+        broadcastSnapshot()
     }
 
     private func finishActive(meetingID: UUID, context: PipelineContext, outcome: BackgroundProcessingOutcome) async {
@@ -197,6 +215,7 @@ public actor MeetingProcessingOrchestrator {
         activeContext = nil
         activeStage = nil
         activeProgress = nil
+        activeSummarizationStatus = nil
         activeTask = nil
         broadcastSnapshot()
 
@@ -223,6 +242,7 @@ public actor MeetingProcessingOrchestrator {
             activeMeetingID: activeMeetingID,
             activeStage: activeStage,
             activeProgress: activeProgress,
+            activeSummarizationStatus: activeSummarizationStatus,
             pendingMeetingID: pending?.meetingID,
             lastOutcome: lastOutcome
         )

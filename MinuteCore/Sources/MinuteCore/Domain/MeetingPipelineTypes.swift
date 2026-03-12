@@ -2,6 +2,7 @@ import Foundation
 
 public enum ProcessingStage: String, Sendable {
     case downloadingModels
+    case normalizingAudioLevels
     case transcribing
     case summarizing
 }
@@ -40,6 +41,8 @@ public enum MeetingPipelineState {
             switch stage {
             case .downloadingModels:
                 return "Downloading Models"
+            case .normalizingAudioLevels:
+                return "Normalizing Audio Levels"
             case .transcribing:
                 return "Transcribing"
             case .summarizing:

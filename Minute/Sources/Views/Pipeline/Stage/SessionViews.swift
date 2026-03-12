@@ -344,7 +344,7 @@ struct RecordingSessionCardView: View {
                             .font(.system(size: 24, weight: .semibold))
                             .foregroundStyle(Color.minuteTextSecondary)
 
-                        Text(model.state.statusLabel)
+                        Text(model.currentStatusLabel)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Color.minuteTextPrimary)
                     }

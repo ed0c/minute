@@ -76,6 +76,8 @@ final class MeetingPipelineViewModel: ObservableObject {
     @Published private(set) var state: MeetingPipelineState = .idle
     @Published private(set) var captureState: CaptureState = .ready
     @Published private(set) var progress: Double? = nil
+    @Published private(set) var statusLabelOverride: String? = nil
+    @Published private(set) var summarizationProgressDetail: String? = nil
     @Published private(set) var backgroundProcessingSnapshot: BackgroundProcessingSnapshot = BackgroundProcessingSnapshot()
     @Published private(set) var lastBackgroundProcessedNoteURL: URL? = nil
     @Published private(set) var vaultStatus: VaultStatus = VaultStatus(displayText: "Not selected", isConfigured: false)
@@ -154,6 +156,10 @@ final class MeetingPipelineViewModel: ObservableObject {
     var selectedMeetingTypeWarningMessage: String? {
         guard !isSelectedMeetingTypeAvailable else { return nil }
         return "Selected meeting type is no longer available. Choose another type before processing."
+    }
+
+    var currentStatusLabel: String {
+        statusLabelOverride ?? state.statusLabel
     }
 
     var isSelectedMeetingTypeAvailable: Bool {
@@ -470,11 +476,17 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     static func live() -> MeetingPipelineViewModel {
         let selectionStore = SummarizationModelSelectionStore()
+        let contextWindowStore = SummarizationContextWindowSelectionStore()
+        let hardwareProfile = SummarizationHardwareProfile.current()
         let transcriptionSelectionStore = TranscriptionModelSelectionStore()
         let transcriptionBackendStore = TranscriptionBackendSelectionStore()
         let fluidAudioModelStore = FluidAudioASRModelSelectionStore()
         let summarizationServiceProvider: @Sendable () -> any SummarizationServicing = {
-            LlamaLibrarySummarizationService.liveDefault(selectionStore: selectionStore)
+            LlamaLibrarySummarizationService.liveDefault(
+                selectionStore: selectionStore,
+                contextWindowStore: contextWindowStore,
+                hardwareProfile: hardwareProfile
+            )
         }
         let transcriptionService: any TranscriptionServicing
         switch transcriptionBackendStore.selectedBackend() {
@@ -502,7 +514,16 @@ final class MeetingPipelineViewModel: ObservableObject {
             audioLoudnessNormalizer: AudioLoudnessNormalizer(),
             modelManager: modelManager,
             vaultAccess: vaultAccess,
-            vaultWriter: DefaultVaultWriter()
+            vaultWriter: DefaultVaultWriter(),
+            summarizationModelIDProvider: { selectionStore.selectedModel().id },
+            summarizationPreflightConfigurationProvider: {
+                SummarizationPreflightConfiguration(
+                    contextWindowTokens: contextWindowStore.requestedContextTokens(
+                        hardwareProfile: hardwareProfile
+                    ),
+                    reservedOutputTokens: 1_024
+                )
+            }
         )
 
         return MeetingPipelineViewModel(
@@ -1016,7 +1037,10 @@ final class MeetingPipelineViewModel: ObservableObject {
         guard state.canImportMedia else { return }
 
         processingTask?.cancel()
-        progress = nil
+        let isVideoImport = isVideoImportURL(url)
+        progress = 0.05
+        statusLabelOverride = isVideoImport ? "Converting Video to Audio" : "Importing Audio"
+        summarizationProgressDetail = nil
         screenContextEvents = []
         screenInferenceStatus = nil
         screenCaptureBaseProcessedCount = 0
@@ -1027,7 +1051,9 @@ final class MeetingPipelineViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let result = try await mediaImportService.importMedia(from: url)
-                if screenContextSettingsStore.isVideoImportEnabled, isVideoImportURL(url) {
+                if screenContextSettingsStore.isVideoImportEnabled, isVideoImport {
+                    progress = 0.3
+                    statusLabelOverride = "Analyzing Video"
                     screenInferenceStatus = ScreenInferenceStatus(
                         processedCount: 0,
                         skippedCount: 0,
@@ -1050,6 +1076,8 @@ final class MeetingPipelineViewModel: ObservableObject {
                 try Task.checkCancellation()
                 let startedAt = result.suggestedStartDate
                 let stoppedAt = startedAt.addingTimeInterval(result.duration)
+                progress = nil
+                statusLabelOverride = nil
                 state = .recorded(
                     audioTempURL: result.wavURL,
                     durationSeconds: result.duration,
@@ -1058,6 +1086,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                 )
             } catch is CancellationError {
                 progress = nil
+                statusLabelOverride = nil
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureBaseProcessedCount = 0
@@ -1065,6 +1094,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                 state = .idle
             } catch let minuteError as MinuteError {
                 progress = nil
+                statusLabelOverride = nil
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureBaseProcessedCount = 0
@@ -1072,6 +1102,7 @@ final class MeetingPipelineViewModel: ObservableObject {
                 state = .failed(error: minuteError, debugOutput: minuteError.debugSummary)
             } catch {
                 progress = nil
+                statusLabelOverride = nil
                 screenInferenceStatus = nil
                 screenContextEvents = []
                 screenCaptureBaseProcessedCount = 0
@@ -1481,6 +1512,11 @@ final class MeetingPipelineViewModel: ObservableObject {
                     if self.lastBackgroundProcessedNoteURL != lastCompletedNoteURL {
                         self.lastBackgroundProcessedNoteURL = lastCompletedNoteURL
                     }
+                    if snapshot.activeMeetingID != nil {
+                        self.summarizationProgressDetail = self.makeSummarizationProgressDetail(snapshot.activeSummarizationStatus)
+                    } else if case .idle = self.state {
+                        self.summarizationProgressDetail = nil
+                    }
                 }
             }
         }
@@ -1521,9 +1557,13 @@ final class MeetingPipelineViewModel: ObservableObject {
                 }
             )
             progress = nil
+            statusLabelOverride = nil
+            summarizationProgressDetail = nil
             state = .done(noteURL: outputs.noteURL, audioURL: outputs.audioURL)
         } catch is CancellationError {
             progress = nil
+            statusLabelOverride = nil
+            summarizationProgressDetail = nil
 
             if let recorded = state.recordedContextIfAvailable {
                 state = .recorded(
@@ -1537,27 +1577,95 @@ final class MeetingPipelineViewModel: ObservableObject {
             }
         } catch let minuteError as MinuteError {
             progress = nil
+            statusLabelOverride = nil
+            summarizationProgressDetail = nil
             state = .failed(error: minuteError, debugOutput: minuteError.debugSummary)
         } catch {
             progress = nil
+            statusLabelOverride = nil
+            summarizationProgressDetail = nil
             state = .failed(error: .vaultWriteFailed, debugOutput: ErrorHandler.debugMessage(for: error))
         }
     }
 
     private func applyPipelineProgress(_ update: PipelineProgress, context: PipelineContext) {
         progress = min(max(update.fractionCompleted, 0), 1)
+        statusLabelOverride = nil
 
         switch update.stage {
         case .downloadingModels:
+            summarizationProgressDetail = nil
             state = .processing(stage: .downloadingModels, context: context)
+        case .normalizingAudioLevels:
+            summarizationProgressDetail = nil
+            state = .processing(stage: .normalizingAudioLevels, context: context)
         case .transcribing:
+            summarizationProgressDetail = nil
             state = .processing(stage: .transcribing, context: context)
         case .summarizing:
+            summarizationProgressDetail = makeSummarizationProgressDetail(update)
             state = .processing(stage: .summarizing, context: context)
         case .writing:
+            summarizationProgressDetail = nil
             guard let extraction = update.extraction else { return }
             state = .writing(context: context, extraction: extraction)
         }
+    }
+
+    private func makeSummarizationProgressDetail(_ update: PipelineProgress) -> String? {
+        makeSummarizationProgressDetail(
+            estimatedPassCount: update.estimatedPassCount,
+            currentPassIndex: update.currentPassIndex,
+            totalPassCount: update.totalPassCount,
+            resumedFromPassIndex: update.resumedFromPassIndex
+        )
+    }
+
+    private func makeSummarizationProgressDetail(_ status: ActiveSummarizationStatus?) -> String? {
+        guard let status else { return nil }
+        return makeSummarizationProgressDetail(
+            estimatedPassCount: status.estimatedPassCount,
+            currentPassIndex: status.currentPassIndex,
+            totalPassCount: status.totalPassCount,
+            resumedFromPassIndex: status.resumedFromPassIndex
+        )
+    }
+
+    private func makeSummarizationProgressDetail(
+        estimatedPassCount: Int?,
+        currentPassIndex: Int?,
+        totalPassCount: Int?,
+        resumedFromPassIndex: Int?
+    ) -> String? {
+        Self.formatSummarizationProgressDetail(
+            estimatedPassCount: estimatedPassCount,
+            currentPassIndex: currentPassIndex,
+            totalPassCount: totalPassCount,
+            resumedFromPassIndex: resumedFromPassIndex
+        )
+    }
+
+    static func formatSummarizationProgressDetail(
+        estimatedPassCount: Int?,
+        currentPassIndex: Int?,
+        totalPassCount: Int?,
+        resumedFromPassIndex: Int?
+    ) -> String? {
+        var segments: [String] = []
+        if let resumedFromPassIndex, resumedFromPassIndex > 1 {
+            segments.append("Resuming from pass \(resumedFromPassIndex)")
+        }
+        if let estimate = estimatedPassCount, estimate > 1 {
+            segments.append("Estimated passes: \(estimate)")
+        }
+        if let current = currentPassIndex,
+           let total = totalPassCount,
+           total > 0,
+           current > 0 {
+            segments.append("Pass \(current) of \(total)")
+        }
+        guard !segments.isEmpty else { return nil }
+        return segments.joined(separator: " • ")
     }
 
     private func makePipelineContext(
@@ -1772,7 +1880,7 @@ final class MeetingPipelineViewModel: ObservableObject {
     func workspaceContinuitySnapshot() -> WorkspaceContinuitySnapshot {
         WorkspaceContinuitySnapshot(
             isRecordingActive: captureState == .recording,
-            pipelineStage: state.statusLabel,
+            pipelineStage: currentStatusLabel,
             activeSessionID: currentSessionID,
             unsavedWorkPresent: hasActiveSessionContext
         )

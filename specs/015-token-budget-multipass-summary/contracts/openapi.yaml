@@ -1,0 +1,249 @@
+openapi: 3.0.3
+info:
+  title: Minute Multi-Pass Summarization Contract
+  version: 0.1.0
+  description: |
+    Internal orchestration contract for token-budget preflight and multi-pass summarization.
+    This contract defines behavior boundaries and does not imply outbound network behavior.
+servers:
+  - url: local://minute-core
+paths:
+  /summarization/preflight:
+    post:
+      summary: Compute token budget and pass estimate
+      operationId: computeSummarizationPreflight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreflightRequest'
+      responses:
+        '200':
+          description: Preflight estimate generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenBudgetEstimate'
+  /summarization/runs:
+    post:
+      summary: Create and start a multi-pass summarization run
+      operationId: createSummarizationRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '202':
+          description: Run accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunState'
+  /summarization/runs/{runId}:
+    get:
+      summary: Get run status and pass progress
+      operationId: getSummarizationRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Current run state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunState'
+  /summarization/runs/{runId}/resume:
+    post:
+      summary: Resume a paused run from last valid checkpoint
+      description: >
+        Resumes from `latestValidSummary.completedPassIndex + 1` and continues
+        updating the originally resolved summary document path.
+      operationId: resumeSummarizationRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: Run resumed from the next uncompleted pass
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunState'
+        '409':
+          description: Run cannot be resumed
+  /summarization/runs/{runId}/cancel:
+    post:
+      summary: Cancel active run
+      description: >
+        Cancels the active pass while retaining the latest valid summary
+        checkpoint so a later retry can resume safely.
+      operationId: cancelSummarizationRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: Cancellation accepted with latest valid checkpoint retained
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunState'
+components:
+  parameters:
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    PreflightRequest:
+      type: object
+      required:
+        - meetingId
+        - modelId
+        - transcriptText
+        - maxOutputTokens
+      properties:
+        meetingId:
+          type: string
+        modelId:
+          type: string
+        transcriptText:
+          type: string
+        maxOutputTokens:
+          type: integer
+          minimum: 1
+        safetyMarginTokens:
+          type: integer
+          minimum: 0
+    CreateRunRequest:
+      type: object
+      required:
+        - meetingId
+        - modelId
+        - transcriptText
+      properties:
+        meetingId:
+          type: string
+        modelId:
+          type: string
+        transcriptText:
+          type: string
+        preflightEstimate:
+          $ref: '#/components/schemas/TokenBudgetEstimate'
+    TokenBudgetEstimate:
+      type: object
+      required:
+        - runId
+        - modelId
+        - contextWindowTokens
+        - reservedOutputTokens
+        - safetyMarginTokens
+        - promptOverheadTokens
+        - availableInputTokensPerPass
+        - estimatedTotalInputTokens
+        - estimatedPassCount
+      properties:
+        runId:
+          type: string
+        modelId:
+          type: string
+        contextWindowTokens:
+          type: integer
+          minimum: 1
+        reservedOutputTokens:
+          type: integer
+          minimum: 1
+        safetyMarginTokens:
+          type: integer
+          minimum: 0
+        promptOverheadTokens:
+          type: integer
+          minimum: 0
+        availableInputTokensPerPass:
+          type: integer
+          minimum: 1
+        estimatedTotalInputTokens:
+          type: integer
+          minimum: 0
+        estimatedPassCount:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+    RunState:
+      type: object
+      required:
+        - runId
+        - meetingId
+        - status
+        - currentPassIndex
+        - totalPassCount
+        - passes
+      properties:
+        runId:
+          type: string
+        meetingId:
+          type: string
+        status:
+          type: string
+          enum: [initialized, planning, running, paused_for_retry, completed, failed, cancelled]
+        currentPassIndex:
+          type: integer
+          minimum: 0
+        totalPassCount:
+          type: integer
+          minimum: 1
+        latestValidSummary:
+          $ref: '#/components/schemas/SummarySnapshot'
+        passes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassRecord'
+    SummarySnapshot:
+      type: object
+      description: >
+        Last schema-valid summary accepted after a pass. This checkpoint is
+        retained across failures and cancellations and is the resume boundary
+        for later retries.
+      required:
+        - completedPassIndex
+        - payloadChecksum
+        - updatedAt
+      properties:
+        completedPassIndex:
+          type: integer
+          minimum: 0
+        payloadChecksum:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    PassRecord:
+      type: object
+      required:
+        - passIndex
+        - chunkId
+        - status
+      properties:
+        passIndex:
+          type: integer
+          minimum: 1
+        chunkId:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled, skipped]
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type: string
+        errorMessage:
+          type: string

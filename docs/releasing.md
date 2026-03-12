@@ -77,6 +77,13 @@ Validation summaries from the latest dry-run evidence are stored at:
 - `specs/009-app-store-release/artifacts/direct-release-summary.json`
 - `specs/009-app-store-release/artifacts/app-store-release-summary.json`
 
+## Long-Meeting Validation
+
+Before shipping summarization changes, verify:
+- token-budget preflight is visible before summarization starts
+- canceling a later pass keeps the last valid summary checkpoint
+- retry after failure or app relaunch resumes on the same summary note path without creating a duplicate note
+
 ## CI: publish appcast only (direct profile)
 
 Workflow: `.github/workflows/publish-appcast.yml`

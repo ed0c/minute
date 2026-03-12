@@ -14,6 +14,12 @@ final class ModelsSettingsViewModel: ObservableObject {
             refresh()
         }
     }
+    @Published var selectedSummarizationContextWindowPreset: SummarizationContextWindowPreset {
+        didSet {
+            guard oldValue != selectedSummarizationContextWindowPreset else { return }
+            summarizationContextWindowStore.setSelectedPreset(selectedSummarizationContextWindowPreset)
+        }
+    }
     @Published var selectedTranscriptionBackendID: String {
         didSet {
             guard oldValue != selectedTranscriptionBackendID else { return }
@@ -62,6 +68,7 @@ final class ModelsSettingsViewModel: ObservableObject {
 
     private let vocabularySettingsStore: any VocabularyBoostingSettingsStoring
     private let summarizationModelStore: SummarizationModelSelectionStore
+    private let summarizationContextWindowStore: SummarizationContextWindowSelectionStore
     private let transcriptionModelStore: TranscriptionModelSelectionStore
     private let transcriptionBackendStore: TranscriptionBackendSelectionStore
     private let fluidAudioModelStore: FluidAudioASRModelSelectionStore
@@ -74,6 +81,7 @@ final class ModelsSettingsViewModel: ObservableObject {
     init(
         modelManager: (any ModelManaging)? = nil,
         summarizationModelStore: SummarizationModelSelectionStore = SummarizationModelSelectionStore(),
+        summarizationContextWindowStore: SummarizationContextWindowSelectionStore = SummarizationContextWindowSelectionStore(),
         transcriptionModelStore: TranscriptionModelSelectionStore = TranscriptionModelSelectionStore(),
         transcriptionBackendStore: TranscriptionBackendSelectionStore = TranscriptionBackendSelectionStore(),
         fluidAudioModelStore: FluidAudioASRModelSelectionStore = FluidAudioASRModelSelectionStore(),
@@ -81,6 +89,7 @@ final class ModelsSettingsViewModel: ObservableObject {
         vocabularySettingsStore: (any VocabularyBoostingSettingsStoring)? = nil
     ) {
         self.summarizationModelStore = summarizationModelStore
+        self.summarizationContextWindowStore = summarizationContextWindowStore
         self.transcriptionModelStore = transcriptionModelStore
         self.transcriptionBackendStore = transcriptionBackendStore
         self.fluidAudioModelStore = fluidAudioModelStore
@@ -101,6 +110,7 @@ final class ModelsSettingsViewModel: ObservableObject {
         if summarizationModelStore.selectedModelID() != selectedModel.id {
             summarizationModelStore.setSelectedModelID(selectedModel.id)
         }
+        self.selectedSummarizationContextWindowPreset = summarizationContextWindowStore.selectedPreset()
         let selectedBackend = transcriptionBackendStore.selectedBackend()
         self.selectedTranscriptionBackendID = selectedBackend.id
         if transcriptionBackendStore.selectedBackendID() != selectedBackend.id {
@@ -146,6 +156,14 @@ final class ModelsSettingsViewModel: ObservableObject {
 
     var summarizationModels: [SummarizationModel] {
         SummarizationModelCatalog.all
+    }
+
+    var summarizationContextWindowPresets: [SummarizationContextWindowPreset] {
+        SummarizationContextWindowPreset.allCases
+    }
+
+    var recommendedSummarizationContextWindowPreset: SummarizationContextWindowPreset {
+        summarizationContextWindowStore.recommendedPreset()
     }
 
     var transcriptionBackends: [TranscriptionBackend] {

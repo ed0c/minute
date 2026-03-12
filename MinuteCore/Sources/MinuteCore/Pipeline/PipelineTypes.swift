@@ -2,6 +2,7 @@ import Foundation
 
 public enum PipelineStage: String, Sendable, Equatable {
     case downloadingModels
+    case normalizingAudioLevels
     case transcribing
     case summarizing
     case writing
@@ -11,11 +12,30 @@ public struct PipelineProgress: Sendable, Equatable {
     public var stage: PipelineStage
     public var fractionCompleted: Double
     public var extraction: MeetingExtraction?
+    public var preflightBudgetTokens: Int?
+    public var estimatedPassCount: Int?
+    public var currentPassIndex: Int?
+    public var totalPassCount: Int?
+    public var resumedFromPassIndex: Int?
 
-    public init(stage: PipelineStage, fractionCompleted: Double, extraction: MeetingExtraction? = nil) {
+    public init(
+        stage: PipelineStage,
+        fractionCompleted: Double,
+        extraction: MeetingExtraction? = nil,
+        preflightBudgetTokens: Int? = nil,
+        estimatedPassCount: Int? = nil,
+        currentPassIndex: Int? = nil,
+        totalPassCount: Int? = nil,
+        resumedFromPassIndex: Int? = nil
+    ) {
         self.stage = stage
         self.fractionCompleted = fractionCompleted
         self.extraction = extraction
+        self.preflightBudgetTokens = preflightBudgetTokens
+        self.estimatedPassCount = estimatedPassCount
+        self.currentPassIndex = currentPassIndex
+        self.totalPassCount = totalPassCount
+        self.resumedFromPassIndex = resumedFromPassIndex
     }
 
     public static func downloadingModels(fractionCompleted: Double) -> PipelineProgress {
@@ -26,8 +46,27 @@ public struct PipelineProgress: Sendable, Equatable {
         PipelineProgress(stage: .transcribing, fractionCompleted: fractionCompleted)
     }
 
-    public static func summarizing(fractionCompleted: Double) -> PipelineProgress {
-        PipelineProgress(stage: .summarizing, fractionCompleted: fractionCompleted)
+    public static func normalizingAudioLevels(fractionCompleted: Double) -> PipelineProgress {
+        PipelineProgress(stage: .normalizingAudioLevels, fractionCompleted: fractionCompleted)
+    }
+
+    public static func summarizing(
+        fractionCompleted: Double,
+        preflightBudgetTokens: Int? = nil,
+        estimatedPassCount: Int? = nil,
+        currentPassIndex: Int? = nil,
+        totalPassCount: Int? = nil,
+        resumedFromPassIndex: Int? = nil
+    ) -> PipelineProgress {
+        PipelineProgress(
+            stage: .summarizing,
+            fractionCompleted: fractionCompleted,
+            preflightBudgetTokens: preflightBudgetTokens,
+            estimatedPassCount: estimatedPassCount,
+            currentPassIndex: currentPassIndex,
+            totalPassCount: totalPassCount,
+            resumedFromPassIndex: resumedFromPassIndex
+        )
     }
 
     public static func writing(fractionCompleted: Double, extraction: MeetingExtraction) -> PipelineProgress {

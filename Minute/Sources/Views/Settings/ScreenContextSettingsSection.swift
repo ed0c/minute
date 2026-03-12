@@ -24,27 +24,10 @@ struct ScreenContextSettingsSection: View {
                     Text(intervalLabel)
                         .minuteCaption()
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Slider(value: captureIntervalIndex, in: 0...Double(Self.captureIntervals.count - 1), step: 1)
-                        .tint(.accentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    HStack(spacing: 0) {
-                        ForEach(Self.captureIntervals.indices, id: \.self) { index in
-                            let value = Self.captureIntervals[index]
-                            let alignment: Alignment = {
-                                if index == 0 { return .leading }
-                                if index == Self.captureIntervals.count - 1 { return .trailing }
-                                return .center
-                            }()
-
-                            Text(Self.label(for: value))
-                                .minuteCaption()
-                                .frame(maxWidth: .infinity, alignment: alignment)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSteppedControl(
+                    stepLabels: Self.captureIntervals.map(Self.label(for:)),
+                    selectedIndex: captureIntervalIndex
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .gridCellColumns(2)
@@ -59,13 +42,13 @@ struct ScreenContextSettingsSection: View {
 
     private static let captureIntervals: [Double] = [10, 30, 60]
 
-    private var captureIntervalIndex: Binding<Double> {
-        Binding<Double>(
+    private var captureIntervalIndex: Binding<Int> {
+        Binding<Int>(
             get: {
-                Double(Self.index(for: captureIntervalSeconds))
+                Self.index(for: captureIntervalSeconds)
             },
             set: { newValue in
-                let index = max(0, min(Int(newValue.rounded()), Self.captureIntervals.count - 1))
+                let index = max(0, min(newValue, Self.captureIntervals.count - 1))
                 captureIntervalSeconds = Self.captureIntervals[index]
             }
         )

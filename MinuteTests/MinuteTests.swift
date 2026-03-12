@@ -63,13 +63,36 @@ struct PipelineStatusPresenterParityTests {
                 backgroundProcessingSnapshot: BackgroundProcessingSnapshot(),
                 isFirstScreenInferenceDeferred: false,
                 progress: nil,
+                statusLabelOverride: nil,
                 recoverableRecordings: [],
-                recordingWarningDetail: nil
+                recordingWarningDetail: nil,
+                summarizationProgressDetail: nil
             ),
             dismissedStatusDrawerID: nil
         )
 
         #expect(presentation?.primaryAction == .process)
+    }
+
+    @Test
+    func importingState_prefersStatusOverrideTitle() {
+        let presenter = PipelineStatusPresenter()
+        let presentation = presenter.presentation(
+            for: PipelineStatusPresenter.Input(
+                state: .importing(sourceURL: URL(fileURLWithPath: "/tmp/input.mov")),
+                backgroundProcessingSnapshot: BackgroundProcessingSnapshot(),
+                isFirstScreenInferenceDeferred: false,
+                progress: 0.3,
+                statusLabelOverride: "Analyzing Video",
+                recoverableRecordings: [],
+                recordingWarningDetail: nil,
+                summarizationProgressDetail: nil
+            ),
+            dismissedStatusDrawerID: nil
+        )
+
+        #expect(presentation?.title == "Analyzing Video")
+        #expect(presentation?.progress == 0.3)
     }
 }
 
@@ -580,6 +603,23 @@ struct OnboardingPersistenceCoverageTests {
 
         #expect(firstLaunch.isComplete)
         #expect(secondLaunch.isComplete)
+    }
+
+    @Test
+    func selectedSummarizationContextWindowPreset_persistsAcrossRelaunches() throws {
+        let suite = "OnboardingPersistenceCoverageTests.contextPreset.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let contextStore = SummarizationContextWindowSelectionStore(defaults: defaults)
+        contextStore.setSelectedPreset(.maximum)
+
+        let firstLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+        let secondLaunch = OnboardingViewModel(modelManager: MockModelManager(), defaults: defaults)
+
+        #expect(firstLaunch.selectedSummarizationContextWindowPreset == .maximum)
+        #expect(secondLaunch.selectedSummarizationContextWindowPreset == .maximum)
     }
 }
 

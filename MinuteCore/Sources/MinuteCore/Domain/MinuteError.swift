@@ -29,6 +29,7 @@ public enum MinuteError: Error, LocalizedError, Sendable {
     case jsonInvalid
     case vaultWriteFailed
     case invalidMeetingTypeSelection
+    case pipelineRunAlreadyActive
 
     case llamaMTMDMissing
     case llamaMTMDFailed(exitCode: Int32, output: String)
@@ -79,6 +80,8 @@ public enum MinuteError: Error, LocalizedError, Sendable {
             return "Failed to write meeting files to the vault."
         case .invalidMeetingTypeSelection:
             return "Selected meeting type is no longer available. Choose a valid meeting type."
+        case .pipelineRunAlreadyActive:
+            return "A processing run is already active for this meeting."
         case .llamaMTMDMissing:
             return "Multimodal inference component is missing."
         case .llamaMTMDFailed:

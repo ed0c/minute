@@ -44,6 +44,14 @@ struct ModelsSettingsSection: View {
 
                 Divider()
 
+                SummarizationContextWindowPicker(
+                    presets: model.summarizationContextWindowPresets,
+                    recommendedPreset: model.recommendedSummarizationContextWindowPreset,
+                    selection: $model.selectedSummarizationContextWindowPreset
+                )
+
+                Divider()
+
                 ModelDownloadStatusView(
                     title: "\(model.selectedTranscriptionBackendDisplayName) + Llama models",
                     detail: "Required for local transcription and summarization.",

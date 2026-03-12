@@ -69,8 +69,7 @@ struct StatusDrawerView: View {
                 .truncationMode(.tail)
 
             if let progress = model.progress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
+                FlashingLinearProgressView(progress: progress)
             } else if model.showsActivity {
                 ProgressView()
                     .progressViewStyle(.linear)
@@ -110,5 +109,54 @@ struct StatusDrawerView: View {
             border: model.isError ? Color.red.opacity(0.6) : Color.minuteOutline,
             shadowOpacity: 0.2
         )
+    }
+}
+
+private struct FlashingLinearProgressView: View {
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let clampedProgress = min(max(progress, 0), 1)
+            let fillWidth = proxy.size.width * clampedProgress
+            let sheenWidth = min(max(fillWidth * 0.24, 16), 42)
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.minuteGlow)
+                    .frame(width: fillWidth)
+                    .overlay(alignment: .leading) {
+                        if fillWidth > 20 {
+                            TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+                                let duration = 1.5
+                                let cycleProgress = timeline.date.timeIntervalSinceReferenceDate
+                                    .truncatingRemainder(dividingBy: duration) / duration
+                                let travelWidth = fillWidth + sheenWidth
+
+                                LinearGradient(
+                                    colors: [
+                                        .clear,
+                                        Color.white.opacity(0.06),
+                                        Color.white.opacity(0.18),
+                                        Color.white.opacity(0.06),
+                                        .clear,
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: sheenWidth, height: proxy.size.height)
+                                .offset(x: (cycleProgress * travelWidth) - sheenWidth)
+                                .blendMode(.screen)
+                            }
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+        .frame(height: 8)
+        .clipped()
     }
 }
