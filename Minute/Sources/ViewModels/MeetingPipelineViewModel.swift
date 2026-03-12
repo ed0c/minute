@@ -1614,7 +1614,6 @@ final class MeetingPipelineViewModel: ObservableObject {
 
     private func makeSummarizationProgressDetail(_ update: PipelineProgress) -> String? {
         makeSummarizationProgressDetail(
-            preflightBudgetTokens: update.preflightBudgetTokens,
             estimatedPassCount: update.estimatedPassCount,
             currentPassIndex: update.currentPassIndex,
             totalPassCount: update.totalPassCount,
@@ -1625,7 +1624,6 @@ final class MeetingPipelineViewModel: ObservableObject {
     private func makeSummarizationProgressDetail(_ status: ActiveSummarizationStatus?) -> String? {
         guard let status else { return nil }
         return makeSummarizationProgressDetail(
-            preflightBudgetTokens: status.preflightBudgetTokens,
             estimatedPassCount: status.estimatedPassCount,
             currentPassIndex: status.currentPassIndex,
             totalPassCount: status.totalPassCount,
@@ -1634,7 +1632,20 @@ final class MeetingPipelineViewModel: ObservableObject {
     }
 
     private func makeSummarizationProgressDetail(
-        preflightBudgetTokens: Int?,
+        estimatedPassCount: Int?,
+        currentPassIndex: Int?,
+        totalPassCount: Int?,
+        resumedFromPassIndex: Int?
+    ) -> String? {
+        Self.formatSummarizationProgressDetail(
+            estimatedPassCount: estimatedPassCount,
+            currentPassIndex: currentPassIndex,
+            totalPassCount: totalPassCount,
+            resumedFromPassIndex: resumedFromPassIndex
+        )
+    }
+
+    static func formatSummarizationProgressDetail(
         estimatedPassCount: Int?,
         currentPassIndex: Int?,
         totalPassCount: Int?,
@@ -1644,10 +1655,7 @@ final class MeetingPipelineViewModel: ObservableObject {
         if let resumedFromPassIndex, resumedFromPassIndex > 1 {
             segments.append("Resuming from pass \(resumedFromPassIndex)")
         }
-        if let budget = preflightBudgetTokens, budget > 0 {
-            segments.append("Budget: \(budget) tokens/pass")
-        }
-        if let estimate = estimatedPassCount, estimate > 0 {
+        if let estimate = estimatedPassCount, estimate > 1 {
             segments.append("Estimated passes: \(estimate)")
         }
         if let current = currentPassIndex,
